@@ -34,6 +34,11 @@ Source-of-truth design docs: `Recovery_Debt_PRD.md`, `OVERVIEW.md`, `PLAN.md`,
 | 13 | **Inverse Planner** — SLSQP on Ridge coefficients with hard physiological bounds (sleep 5–10h, strain 0–21, alcohol = 0). Surfaces "closest reachable + which bound pinned us" when infeasible. | `backend/ml/solve.py`, `frontend/app/plan/page.tsx`, `POST /api/plan` |
 | 14 | Sensitivity Profile (per-unit Ridge coefficients, IQR whiskers) + Cumulative SHAP Wallet (per-category area chart, re-explained through current model) | `frontend/app/profile/page.tsx`, `frontend/app/wallet/page.tsx` |
 | 15 (partial) | **Demo mode** — synthetic 180-day correlated dataset, idempotent | `backend/synth/generator.py` |
+| 3 | **WHOOP backfill** — token refresh + paged pull of recovery/cycle/sleep/workout, idempotent upserts, rate-limit aware | `backend/workers/backfill.py` |
+| 4 | **WHOOP webhooks** — HMAC-SHA256 verified, async re-pull of last 3 days | `backend/api/webhooks.py` |
+| 4 | **Safety-net cron** — re-pull last 3 days for every connected user | `backend/workers/safety_net.py` |
+| 10 | **Nightly retrain cron config** — Railway dashboard schedule for `train_now.py` | `backend/CRONS.md` |
+| 15 | **PWA install** — manifest.ts, SVG icons, iOS-friendly viewport. Tested in `npm run build`. | `frontend/app/manifest.ts`, `frontend/public/icon*.svg` |
 
 ### Tier-1 differentiation features (CLAUDE.md §"Tier-1") — all built
 
@@ -45,14 +50,12 @@ Source-of-truth design docs: `Recovery_Debt_PRD.md`, `OVERVIEW.md`, `PLAN.md`,
 
 | Day | Feature | Notes |
 |---|---|---|
-| 3 | Real WHOOP backfill (6 months of `/v1/recovery`, `/cycle`, `/sleep`, `/workout`) | Synth covers demo; needed for real-user mode |
-| 4 | WHOOP webhooks + 4 AM safety-net cron on Railway | |
-| 5 | Frontend deploy to Vercel | Local works at `http://localhost:3000` |
-| 10 | Nightly cron on Railway calling `workers/train_now.py` | Currently runs manually |
+| 4 | Register webhook URL in WHOOP dev portal | Code is built (`/api/whoop/webhook`); needs URL added in WHOOP dashboard once frontend deploys |
+| 5 | Frontend deploy to Vercel | First push triggered build; type fixes shipped |
+| 10 | Add Railway cron schedules from `backend/CRONS.md` | One-time setup in Railway dashboard |
 | 14 | Stable IQR whiskers from real history (need ≥10 model versions) | UI shows placeholder bands until then |
-| 15 | PWA install (`next-pwa`) | |
-| 15 | Push notification at 9 PM | VAPID key already in `.env.example` |
-| 15 | Production deploy + Loom walkthrough | Backend live on Railway already |
+| 15 | Push notification at 9 PM | VAPID key already in `.env.example`; needs subscribe flow |
+| 15 | Loom walkthrough | After demo data is in production |
 
 ### 🔒 Load-bearing invariants (CLAUDE.md — guarded by tests)
 

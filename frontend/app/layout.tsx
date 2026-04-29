@@ -30,6 +30,24 @@ export const metadata: Metadata = {
   title: "Recovery Debt — a bank statement for your body",
   description:
     "A per-user model of your recovery, with itemized receipts, a what-if simulator, and an inverse planner.",
+  applicationName: "Recovery Debt",
+  appleWebApp: {
+    capable: true,
+    title: "Recovery Debt",
+    statusBarStyle: "black-translucent",
+  },
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icon.svg", type: "image/svg+xml" }],
+  },
+};
+
+export const viewport = {
+  themeColor: "#1C2B22",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({

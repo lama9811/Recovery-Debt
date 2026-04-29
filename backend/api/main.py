@@ -10,7 +10,7 @@ load_dotenv()
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from api import checkin, data, whoop  # noqa: E402
+from api import checkin, data, webhooks, whoop  # noqa: E402
 from db.client import close_pool, open_pool  # noqa: E402
 
 logger = logging.getLogger("recovery_debt")
@@ -50,6 +50,7 @@ app.add_middleware(
 )
 
 app.include_router(whoop.router)
+app.include_router(webhooks.router)
 app.include_router(data.router)
 app.include_router(checkin.router)
 
