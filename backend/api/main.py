@@ -1,11 +1,17 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
-from api import whoop
-from db.client import close_pool, open_pool
+# Load `backend/.env` for local dev; on Railway/production there is no .env
+# file and the platform injects env vars directly, so this is a no-op.
+load_dotenv()
+
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+from api import checkin, data, whoop  # noqa: E402
+from db.client import close_pool, open_pool  # noqa: E402
 
 logger = logging.getLogger("recovery_debt")
 logging.basicConfig(level=logging.INFO)
@@ -44,6 +50,8 @@ app.add_middleware(
 )
 
 app.include_router(whoop.router)
+app.include_router(data.router)
+app.include_router(checkin.router)
 
 
 @app.get("/health")

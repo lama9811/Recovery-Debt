@@ -1,0 +1,124 @@
+# Recovery Debt
+
+A personal PWA that connects to your WHOOP, trains a per-user Ridge regression
+on your data, and presents the recovery score as a bank-statement-style ledger
+with SHAP receipts, a what-if simulator, and an inverse planner that solves for
+the behaviors required to hit a recovery target.
+
+Source-of-truth design docs: `Recovery_Debt_PRD.md`, `OVERVIEW.md`, `PLAN.md`,
+`BUILD_GUIDE.md`. The PRD wins when there's ambiguity.
+
+## Repo layout
+
+- `frontend/` — Next.js 16 + React 19 + Tailwind v4 + shadcn (Lamarca design
+  system). Deploys to Vercel.
+- `backend/` — FastAPI app (`api/`), ML pipeline (`ml/`), background workers
+  (`workers/`), DB schema (`db/`), synthetic-data generator (`synth/`),
+  tests (`tests/`). Deploys to Railway.
+
+## Status
+
+### ✅ Built
+
+| Day | Feature | Where |
+|---|---|---|
+| 1 | Next.js + FastAPI skeletons | `frontend/`, `backend/api/main.py` |
+| 2 | WHOOP OAuth, 11-table DB schema, Lamarca design system | `backend/api/whoop.py`, `backend/db/schema.sql`, `frontend/app/page.tsx` |
+| 6 | Daily check-in (POST/GET, idempotent on `(user_id, day)`) | `backend/api/checkin.py`, `frontend/app/checkin/page.tsx` |
+| 7 | **Pure** `build_feature_matrix` (28 features, lagged + rolling + missingness flags) | `backend/ml/features.py` |
+| 8 | Ridge + `TimeSeriesSplit` (no random splits — leak guard asserts `val_idx > train_idx.max()`) | `backend/ml/train.py` |
+| 9 | `shap.LinearExplainer` fit on the post-scaler representation; integrity test asserts `\|base + Σ contrib − pred\| < 0.01` | `backend/ml/explain.py`, `backend/tests/test_shap_integrity.py` |
+| 10 | Manual end-to-end retrain CLI (predict tomorrow, persist SHAP) | `backend/workers/train_now.py` |
+| 11 | Bank-statement ledger UI (rolling 7-day balance, top-3 SHAP per day, tomorrow's forecast card) | `frontend/app/page.tsx` |
+| 12 | What-If simulator (4 sliders → live counterfactual replay through current model) | `frontend/app/whatif/page.tsx`, `POST /api/whatif` |
+| 13 | **Inverse Planner** — SLSQP on Ridge coefficients with hard physiological bounds (sleep 5–10h, strain 0–21, alcohol = 0). Surfaces "closest reachable + which bound pinned us" when infeasible. | `backend/ml/solve.py`, `frontend/app/plan/page.tsx`, `POST /api/plan` |
+| 14 | Sensitivity Profile (per-unit Ridge coefficients, IQR whiskers) + Cumulative SHAP Wallet (per-category area chart, re-explained through current model) | `frontend/app/profile/page.tsx`, `frontend/app/wallet/page.tsx` |
+| 15 (partial) | **Demo mode** — synthetic 180-day correlated dataset, idempotent | `backend/synth/generator.py` |
+
+### Tier-1 differentiation features (CLAUDE.md §"Tier-1") — all built
+
+- **Inverse Planner** — `POST /api/plan` + `/plan` page
+- **Sensitivity Profile** — `GET /api/profile` + `/profile` page
+- **Cumulative SHAP Wallet** — `GET /api/wallet` + `/wallet` page
+
+### ⏳ Remaining
+
+| Day | Feature | Notes |
+|---|---|---|
+| 3 | Real WHOOP backfill (6 months of `/v1/recovery`, `/cycle`, `/sleep`, `/workout`) | Synth covers demo; needed for real-user mode |
+| 4 | WHOOP webhooks + 4 AM safety-net cron on Railway | |
+| 5 | Frontend deploy to Vercel | Local works at `http://localhost:3000` |
+| 10 | Nightly cron on Railway calling `workers/train_now.py` | Currently runs manually |
+| 14 | Stable IQR whiskers from real history (need ≥10 model versions) | UI shows placeholder bands until then |
+| 15 | PWA install (`next-pwa`) | |
+| 15 | Push notification at 9 PM | VAPID key already in `.env.example` |
+| 15 | Production deploy + Loom walkthrough | Backend live on Railway already |
+
+### 🔒 Load-bearing invariants (CLAUDE.md — guarded by tests)
+
+1. `build_feature_matrix` is pure → `tests/test_features.py::test_pure`
+2. `TimeSeriesSplit` only, no random splits → `test_no_future_leakage`
+3. SHAP integrity within 0.01 → `test_shap_integrity.py`
+4. Inverse planner respects physiological bounds → `test_solve.py`
+
+## Run locally
+
+```bash
+# 1. Backend
+cd backend
+python -m venv .venv
+.venv/bin/pip install -r requirements-full.txt
+cp .env.example .env  # fill in DATABASE_URL etc.
+.venv/bin/python -m synth.generator        # seed 180 days of demo data
+.venv/bin/python -m workers.train_now      # train Ridge + SHAP, persist artifact
+.venv/bin/uvicorn api.main:app --reload --port 8000
+
+# 2. Frontend (separate terminal)
+cd frontend
+npm ci
+npm run dev   # http://localhost:3000
+```
+
+### Pre-commit gate
+
+```bash
+cd backend  && pytest -x
+cd frontend && npm run lint && npm run build
+```
+
+## Architecture (one-request lifecycle)
+
+```
+WHOOP OAuth → tokens in Supabase
+  ↓
+backfill + webhooks + 4 AM cron populate recoveries / cycles / sleeps / workouts
+  ↓
+daily checkin (POST /api/checkin) writes to checkins
+  ↓
+nightly cron (workers/nightly_train.py)
+  └─ build_feature_matrix → RidgeCV(TimeSeriesSplit) → pickle to ml/artifacts/
+  └─ shap.LinearExplainer → write per-feature contributions to shap_values
+  ↓
+frontend reads predictions + receipts via FastAPI
+  ↓
+inverse planner (api/goals.py → ml/solve.py) on demand
+```
+
+## Honesty rules (PRD §13 — enforced in UI copy)
+
+- ❌ "Alcohol costs you 11 points." → ✅ "On days you logged alcohol, your model predicted 11 points lower."
+- ❌ "You should sleep more." → ✅ "Days with longer sleep had higher predicted recovery."
+- ❌ Any medical claim. Ever.
+- Before day 60 of training data, every insight is labeled "early estimate" — see `frontend/components/ConfidenceLabel.tsx`.
+
+## Environment
+
+`backend/.env.example` lists the required vars. Never commit a populated `.env`
+(it's gitignored). For deploy, Railway injects env vars directly.
+
+## Production
+
+- Backend: `https://recovery-debt-production.up.railway.app` (`/health` returns `{"ok":true}`)
+- Frontend: not yet deployed
+- Database: Supabase Postgres
+- Repo: `lama9811/Recovery-Debt`, default branch `main`
