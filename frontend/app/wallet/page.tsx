@@ -106,8 +106,8 @@ export default function Wallet() {
                 <XAxis
                   dataKey="day"
                   tick={{ fontSize: 10, fill: "var(--rd-fg-muted)" }}
-                  tickFormatter={(v: string) =>
-                    new Date(v).toLocaleDateString(undefined, {
+                  tickFormatter={(v) =>
+                    new Date(String(v)).toLocaleDateString(undefined, {
                       month: "short",
                       day: "numeric",
                     })
@@ -121,9 +121,7 @@ export default function Wallet() {
                     border: "1px solid var(--rd-hair)",
                     fontSize: 12,
                   }}
-                  labelFormatter={(v: string) =>
-                    new Date(v).toLocaleDateString()
-                  }
+                  labelFormatter={(v) => new Date(String(v)).toLocaleDateString()}
                 />
                 {CATEGORIES.map((cat) => (
                   <Area

@@ -136,7 +136,10 @@ export default function Profile() {
                     border: "1px solid var(--rd-hair)",
                     fontSize: 12,
                   }}
-                  formatter={(v: number) => [v.toFixed(2), "coef"]}
+                  formatter={(v) => [
+                    typeof v === "number" ? v.toFixed(2) : String(v),
+                    "coef",
+                  ]}
                 />
                 <Bar dataKey="coef" radius={[4, 4, 0, 0]}>
                   <ErrorBar
