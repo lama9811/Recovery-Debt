@@ -1,108 +1,258 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+"use client";
 
-export default async function Home({
-  searchParams,
-}: {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-}) {
-  const params = await searchParams;
-  const justConnected = params.connected === "1";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 
-  return (
-    <div className="relative flex min-h-screen flex-col">
-      <header className="flex items-center justify-between px-10 pt-10">
-        <Brand />
-        <span className="rd-eyebrow">v.2026.04.27</span>
-      </header>
+import { ConfidenceLabel } from "@/components/ConfidenceLabel";
+import { ErrorState } from "@/components/ErrorState";
+import { Nav } from "@/components/Nav";
+import { apiGet } from "@/lib/api";
 
-      <main className="flex flex-1 items-center px-10 pb-24">
-        <div className="flex w-full max-w-2xl flex-col gap-10">
-          <span className="rd-eyebrow">Recovery Debt</span>
+type Day = {
+  day: string;
+  recovery: number | null;
+  hrv: number | null;
+  rhr: number | null;
+  strain: number | null;
+  sleep_h: number | null;
+  alcohol: number;
+  stress: number | null;
+};
 
-          <h1 className="rd-display text-[clamp(3rem,8vw,5.5rem)]">
-            A bank statement
-            <br />
-            for your body.
-          </h1>
+type Dashboard = {
+  user_id: string;
+  days: Day[];
+  rolling_7d_avg: number | null;
+  n_days: number;
+};
 
-          <p className="max-w-lg text-[1.0625rem] leading-7 text-[color:var(--rd-fg-body)]">
-            Connect your WHOOP and a per-user model learns your specific
-            patterns. Every recovery score comes back as an itemized receipt —
-            sleep, alcohol, strain, stress — so you can see, in numbers,{" "}
-            <em className="italic text-[color:var(--rd-accent)]">why</em>.
-          </p>
+type Receipt = {
+  target_day: string;
+  predicted_recovery: number;
+  base_value: number;
+  top_contributors: { feature: string; contribution: number }[];
+  n_training_days: number;
+  model_version: string;
+  early_estimate: boolean;
+};
 
-          {justConnected ? (
-            <div className="flex flex-col gap-3">
-              <span className="rd-chip rd-chip-deposit mono w-fit">
-                <span className="rd-chip-dot" /> Connected
-              </span>
-              <p className="text-sm text-[color:var(--rd-fg-muted)]">
-                Backfill of the last six months runs on Day 3.
-              </p>
-            </div>
-          ) : (
-            <div className="flex items-center gap-4">
-              <a
-                href={`${API_URL}/api/whoop/connect`}
-                className="rd-btn rd-btn-primary"
-              >
-                Connect WHOOP
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </a>
-              <span className="rd-eyebrow">Read · cycles · sleep · workouts</span>
-            </div>
-          )}
+const FEATURE_LABEL: Record<string, string> = {
+  sleep_h: "Sleep tonight",
+  sleep_h_lag1: "Sleep last night",
+  sleep_h_lag2: "Sleep two nights ago",
+  sleep_h_roll3: "3-day sleep average",
+  sleep_h_roll7: "7-day sleep average",
+  efficiency_pct: "Sleep efficiency",
+  consistency_pct: "Sleep consistency",
+  deep_frac: "Deep sleep share",
+  rem_frac: "REM sleep share",
+  strain_lag1: "Yesterday's strain",
+  strain_lag2: "Strain two days ago",
+  strain_roll3: "3-day strain average",
+  strain_roll7: "7-day strain average",
+  hrv_lag1: "Yesterday's HRV",
+  hrv_roll7: "7-day HRV average",
+  rhr_lag1: "Yesterday's resting HR",
+  alcohol_drinks: "Alcohol today",
+  alcohol_lag1: "Alcohol yesterday",
+  alcohol_roll7: "7-day alcohol average",
+  caffeine_mg: "Caffeine",
+  stress_1to10: "Stress",
+  late_meal_int: "Late meal",
+  ill_int: "Feeling ill",
+  traveling_int: "Traveling",
+  is_weekend: "Weekend",
+  missing_checkin: "Missing check-in",
+  missing_sleep: "Missing sleep data",
+  missing_strain: "Missing strain data",
+};
 
-          <div className="rd-divider" />
-
-          <p className="max-w-lg text-xs leading-relaxed text-[color:var(--rd-fg-muted)]">
-            <span className="rd-eyebrow mr-2">Honesty</span>
-            Before sixty days of data, every insight ships labeled{" "}
-            <em className="italic">early estimate</em> with a confidence
-            interval. The model never makes a causal or medical claim.
-          </p>
-        </div>
-      </main>
-    </div>
-  );
+function fmt(n: number | null | undefined, digits = 0): string {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  return n.toFixed(digits);
 }
 
-function Brand() {
+export default function Home() {
+  const [dash, setDash] = useState<Dashboard | null>(null);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiGet<Dashboard>("/api/dashboard")
+      .then(setDash)
+      .catch((e) => setError(String(e)));
+    apiGet<Receipt>("/api/receipt")
+      .then(setReceipt)
+      .catch(() => {
+        /* receipt is optional — model may not be trained yet */
+      });
+  }, []);
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <Nav />
+        <main className="px-10 pb-24 max-w-3xl">
+          <ErrorState
+            title="Backend not reachable"
+            hint={`${error}. Make sure the FastAPI server is running on :8000 and run \`python -m synth.generator && python -m workers.train_now\` to seed the demo user.`}
+          />
+        </main>
+      </div>
+    );
+  }
+
+  const recent = dash?.days?.slice(-30).reverse() ?? [];
+  const baseline =
+    dash?.days && dash.days.length
+      ? dash.days
+          .map((d) => d.recovery)
+          .filter((r): r is number => r != null)
+          .reduce((a, b) => a + b, 0) /
+        dash.days.filter((d) => d.recovery != null).length
+      : 0;
+
   return (
-    <div className="flex items-center gap-3">
-      <div className="relative grid size-8 place-items-center rounded-md bg-[color:var(--rd-ink)] text-[color:var(--rd-fg-on-ink)]">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="size-[18px]"
-          aria-hidden="true"
-        >
-          <rect x="4" y="14" width="16" height="6" rx="1.5" />
-          <rect x="6" y="9" width="12" height="5" rx="1.5" />
-          <rect x="8" y="4" width="8" height="5" rx="1.5" />
-        </svg>
-        <span className="absolute -right-[2px] -top-[2px] size-[6px] rounded-full bg-[color:var(--rd-accent)]" />
-      </div>
-      <div className="leading-tight">
-        <div className="font-[family-name:var(--font-display)] text-[16px] font-medium tracking-[-0.02em] text-[color:var(--rd-fg)]">
-          Recovery Debt
+    <div className="flex min-h-screen flex-col">
+      <Nav />
+      <main className="flex-1 px-10 pb-24">
+        <div className="mx-auto max-w-5xl">
+          {/* Header stat block */}
+          <section className="grid grid-cols-1 gap-6 md:grid-cols-3 mb-10">
+            <div className="rd-card md:col-span-2">
+              <span className="rd-eyebrow">7-day balance</span>
+              <div className="mt-3 flex items-baseline gap-4">
+                <span className="rd-stat-num rd-stat-xl">
+                  {fmt(dash?.rolling_7d_avg ?? null, 1)}
+                </span>
+                <span className="rd-eyebrow">avg recovery</span>
+              </div>
+              <p className="mt-3 max-w-md text-[13px] leading-6 text-[color:var(--rd-fg-muted)]">
+                Your recovery as a running balance. Every row below is a day —
+                the receipt explains the deltas.
+              </p>
+            </div>
+            <div className="rd-card flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <span className="rd-eyebrow">Tomorrow's forecast</span>
+                {receipt ? (
+                  <ConfidenceLabel nDays={receipt.n_training_days} />
+                ) : null}
+              </div>
+              <div className="rd-stat-num rd-stat-lg">
+                {receipt ? fmt(receipt.predicted_recovery, 1) : "—"}
+              </div>
+              {receipt ? (
+                <div className="flex flex-col gap-1.5">
+                  <span className="rd-eyebrow">top drivers</span>
+                  {receipt.top_contributors.slice(0, 3).map((c) => (
+                    <div key={c.feature} className="flex items-center justify-between text-[12px]">
+                      <span className="text-[color:var(--rd-fg-body)]">
+                        {FEATURE_LABEL[c.feature] ?? c.feature}
+                      </span>
+                      <span
+                        className={
+                          "mono " + (c.contribution >= 0 ? "rd-deposit" : "rd-withdraw")
+                        }
+                      >
+                        {c.contribution >= 0 ? "+" : ""}
+                        {c.contribution.toFixed(1)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-[color:var(--rd-fg-muted)]">
+                  Run <code className="mono">python -m workers.train_now</code> to
+                  produce a forecast.
+                </p>
+              )}
+              <Link
+                href="/plan"
+                className="rd-btn rd-btn-ghost mt-2 self-start"
+              >
+                Plan a target →
+              </Link>
+            </div>
+          </section>
+
+          {/* Ledger */}
+          <section className="rd-card rd-card-tight">
+            <div className="rd-card-head">
+              <h3>Daily ledger</h3>
+              <span className="rd-eyebrow">last 30 days</span>
+            </div>
+            <div>
+              {recent.map((d) => {
+                const delta = d.recovery != null ? d.recovery - baseline : null;
+                return (
+                  <div
+                    key={d.day}
+                    className="grid grid-cols-12 items-center gap-3 border-b border-[color:var(--rd-hair-soft)] px-6 py-3 last:border-b-0 hover:bg-[color:var(--rd-elev)]"
+                  >
+                    <div className="col-span-3 text-[12px] tracking-tight text-[color:var(--rd-fg-muted)]">
+                      {new Date(d.day).toLocaleDateString(undefined, {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </div>
+                    <div className="col-span-2 mono text-[18px] tracking-tight text-[color:var(--rd-fg)]">
+                      {fmt(d.recovery)}
+                    </div>
+                    <div className="col-span-2">
+                      {delta == null ? null : (
+                        <span
+                          className={
+                            "mono text-[12px] " +
+                            (delta >= 0 ? "rd-deposit" : "rd-withdraw")
+                          }
+                        >
+                          {delta >= 0 ? "+" : ""}
+                          {delta.toFixed(1)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="col-span-5 flex items-center gap-2 text-[11px] text-[color:var(--rd-fg-muted)]">
+                      <span>sleep {fmt(d.sleep_h, 1)}h</span>
+                      <span className="rd-whisper">·</span>
+                      <span>strain {fmt(d.strain, 1)}</span>
+                      {d.alcohol > 0 ? (
+                        <>
+                          <span className="rd-whisper">·</span>
+                          <span className="rd-withdraw">alcohol {d.alcohol}</span>
+                        </>
+                      ) : null}
+                      {d.stress != null ? (
+                        <>
+                          <span className="rd-whisper">·</span>
+                          <span>stress {d.stress}/10</span>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+              {recent.length === 0 ? (
+                <div className="px-6 py-12 text-center text-[13px] text-[color:var(--rd-fg-muted)]">
+                  No data yet — run{" "}
+                  <code className="mono">python -m synth.generator</code> to seed the demo user.
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          {/* Honesty footer */}
+          <section className="mt-10">
+            <div className="rd-divider" />
+            <p className="max-w-2xl text-[12px] leading-relaxed text-[color:var(--rd-fg-muted)]">
+              <span className="rd-eyebrow mr-2">Honesty</span>
+              On days you logged alcohol, the model predicted lower recovery.
+              That's the model's pattern, not a medical claim.
+            </p>
+          </section>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
