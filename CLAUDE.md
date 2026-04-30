@@ -22,6 +22,21 @@ Two top-level apps that deploy independently:
 
 Path aliases in `frontend/components.json`: `@/components`, `@/components/ui`, `@/lib`, `@/lib/utils`, `@/hooks`.
 
+### Where the load-bearing code lives
+
+- `backend/ml/features.py` — pure `build_feature_matrix` (28 features, lagged + rolling + missingness flags). Single source of truth for `FEATURE_COLUMNS`.
+- `backend/ml/train.py` — `RidgeCV` + `TimeSeriesSplit`; `latest_artifact()` is the canonical loader.
+- `backend/ml/explain.py` — `make_explainer(pipeline, X_train)` and `explain_one(...)`. Always pass the *raw* `X_train`; the function applies `pipeline[:-1].transform` internally.
+- `backend/ml/solve.py` — `solve_for_target(pipeline, recent_features, target)` returns a `SolveResult` with `feasible`, `achieved_recovery`, `actions`, `infeasibility_reason`. Bounds live in `PHYSIOLOGICAL_BOUNDS`.
+- `backend/synth/generator.py` — 180-day demo dataset for `demo@recoverydebt.local`. Idempotent.
+- `backend/workers/backfill.py` — real-WHOOP 6-month pull with refresh-token grant.
+- `backend/workers/safety_net.py` — re-pull last 3 days for every user. 4 AM cron.
+- `backend/workers/train_now.py` — end-to-end retrain CLI (Day 10 cron entry point).
+- `backend/api/data.py` — `/api/dashboard`, `/api/receipt`, `/api/whatif`, `/api/plan`, `/api/profile`, `/api/wallet`. All scoped to the demo user via `_get_user_id()`; swap that for a session lookup when real-user auth lands.
+- `backend/api/checkin.py` — `GET/POST /api/checkin`.
+- `backend/api/webhooks.py` — `POST /api/whoop/webhook` (HMAC-verified).
+- `backend/CRONS.md` — Railway dashboard schedules (Railway crons aren't configured in `railway.json`; they're per-service in the UI).
+
 ## Commands
 
 ### Frontend (`cd frontend`)
@@ -79,7 +94,9 @@ These come from the PRD and are non-negotiable. Violating them silently breaks t
 
 ## Data flow (one request lifecycle)
 
-WHOOP OAuth → tokens stored in Supabase → backfill + webhooks + 4 AM safety-net cron populate `recoveries` / `cycles` / `sleeps` / `workouts`. User submits daily check-in (`checkins` table). Nightly cron (`workers/nightly_train.py`) calls `build_feature_matrix`, retrains the Ridge pipeline, pickles it to `backend/ml/artifacts/` (gitignored), runs `LinearExplainer`, and writes per-feature contributions to `shap_values`. Frontend reads predictions + receipts via FastAPI; the inverse planner (`api/goals.py` → `ml/solve.py`) is called on demand.
+WHOOP OAuth (`api/whoop.py`) → tokens stored in Supabase → `workers/backfill.py` + `api/webhooks.py` + 4 AM `workers/safety_net.py` cron populate `recoveries` / `cycles` / `sleeps` / `workouts`. User submits daily check-in (`checkins` table) via `api/checkin.py`. Nightly cron (`workers/train_now.py`, scheduled per `backend/CRONS.md`) calls `build_feature_matrix`, retrains the Ridge pipeline, pickles it to `backend/ml/artifacts/` (gitignored), runs `LinearExplainer`, and writes per-feature contributions to `shap_values`. Frontend reads predictions + receipts via FastAPI; the inverse planner (`POST /api/plan` → `ml/solve.py`) is called on demand.
+
+For demo work without a real WHOOP, `backend/synth/generator.py` seeds the same tables for `demo@recoverydebt.local`. Every `api/data.py` endpoint resolves that email by default — when real-user auth lands, swap `_get_user_id()` for a session lookup.
 
 ## Environment
 
@@ -91,6 +108,18 @@ CORS in `api/main.py` allows `http://localhost:3000` and `https://*.vercel.app` 
 
 The project's recruiter signal is concentrated in three pages — when scoping changes, prefer protecting these over polishing elsewhere:
 
-- **Inverse Planner** (`/plan`, `api/goals.py`, `ml/solve.py`)
-- **Sensitivity Profile** (`/profile`) — bar chart of Ridge coefficients with median + IQR across the last ~30 model versions
-- **Cumulative SHAP Wallet** (`/wallet`) — area chart of cumulative SHAP per feature category; re-explain historical days through the *current* model nightly so values stay comparable
+- **Inverse Planner** (`/plan`, `POST /api/plan` in `api/data.py`, `ml/solve.py`)
+- **Sensitivity Profile** (`/profile`, `GET /api/profile`) — bar chart of Ridge coefficients with median + IQR across the last ~30 model versions
+- **Cumulative SHAP Wallet** (`/wallet`, `GET /api/wallet`) — area chart of cumulative SHAP per feature category; re-explain historical days through the *current* model nightly so values stay comparable
+
+## End-to-end smoke from a clean checkout
+
+```bash
+cd backend
+.venv/bin/python -m synth.generator        # seed 180 days for demo user
+.venv/bin/python -m workers.train_now      # train + write artifact + write tomorrow's prediction
+.venv/bin/uvicorn api.main:app --reload    # backend on :8000
+# in frontend/: npm run dev → :3000 lights up with real numbers
+```
+
+If `train_now` reports an integrity residual > 0.01, the SHAP explainer is fit on the wrong reference data — see invariant #3 above.
