@@ -8,6 +8,29 @@ the behaviors required to hit a recovery target.
 Source-of-truth design docs: `Recovery_Debt_PRD.md`, `OVERVIEW.md`, `PLAN.md`,
 `BUILD_GUIDE.md`. The PRD wins when there's ambiguity.
 
+## Quick demo (no WHOOP needed)
+
+```bash
+# Backend — seed synthetic data and train the model
+cd backend
+.venv/bin/pip install -r requirements-full.txt
+cp .env.example .env   # fill in DATABASE_URL (Supabase) at minimum
+.venv/bin/python -m synth.generator       # 180 days of correlated demo data
+.venv/bin/python -m workers.train_now     # train Ridge + SHAP, predict tomorrow
+.venv/bin/uvicorn api.main:app --reload   # http://localhost:8000
+
+# Frontend
+cd ../frontend
+npm ci
+npm run dev                                # http://localhost:3000
+```
+
+Then open http://localhost:3000 and click around: the **ledger** (home) shows
+the synthetic recovery history with deltas, **What-If** lets you drag sliders
+and see the prediction update live, and **Plan** runs the inverse planner —
+type a target recovery and get back either a feasible plan or "closest
+reachable is X because Y is at its physiological bound."
+
 ## Repo layout
 
 - `frontend/` — Next.js 16 + React 19 + Tailwind v4 + shadcn (Lamarca design
