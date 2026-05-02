@@ -66,7 +66,7 @@ export default function Plan() {
             <p className="mt-3 max-w-xl text-[14px] leading-7 text-[color:var(--rd-fg-muted)]">
               Pick a target. The planner runs SLSQP on your trained Ridge with
               physiological bounds (sleep 5–10h, strain 0–21, alcohol 0) and
-              returns the closest reachable plan. Coach can't do this.
+              returns the closest reachable plan. Coach can&apos;t do this.
             </p>
           </div>
 

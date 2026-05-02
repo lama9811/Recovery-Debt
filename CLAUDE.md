@@ -32,9 +32,12 @@ Path aliases in `frontend/components.json`: `@/components`, `@/components/ui`, `
 - `backend/workers/backfill.py` — real-WHOOP 6-month pull with refresh-token grant.
 - `backend/workers/safety_net.py` — re-pull last 3 days for every user. 4 AM cron.
 - `backend/workers/train_now.py` — end-to-end retrain CLI (Day 10 cron entry point).
+- `backend/workers/notify_evening.py` — 9 PM Web Push: tomorrow's predicted recovery, with the PRD §13 "early estimate" label before 60 training days. Pure `build_evening_payload` is unit-tested; the I/O shell prunes 404/410 dead subscriptions and no-ops if `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` are unset.
 - `backend/api/data.py` — `/api/dashboard`, `/api/receipt`, `/api/whatif`, `/api/plan`, `/api/profile`, `/api/wallet`. All scoped to the demo user via `_get_user_id()`; swap that for a session lookup when real-user auth lands.
 - `backend/api/checkin.py` — `GET/POST /api/checkin`.
+- `backend/api/push.py` — `POST /api/push/subscribe` and `/unsubscribe`. Endpoint is the natural unique key on `push_subscriptions`; re-subscribes update in place.
 - `backend/api/webhooks.py` — `POST /api/whoop/webhook` (HMAC-verified).
+- `backend/db/migrations/` — apply ordered SQL files to existing databases when `schema.sql` gains a table after the project has been deployed (e.g. `001_push_subscriptions.sql`).
 - `backend/CRONS.md` — Railway dashboard schedules (Railway crons aren't configured in `railway.json`; they're per-service in the UI).
 
 ## Commands
@@ -98,9 +101,11 @@ WHOOP OAuth (`api/whoop.py`) → tokens stored in Supabase → `workers/backfill
 
 For demo work without a real WHOOP, `backend/synth/generator.py` seeds the same tables for `demo@recoverydebt.local`. Every `api/data.py` endpoint resolves that email by default — when real-user auth lands, swap `_get_user_id()` for a session lookup.
 
+Independent secondary loop: the browser registers a `PushSubscription` via `frontend/lib/push.ts` (triggered by `<EnableNotificationsButton>` on the dashboard) and POSTs it to `api/push.py`. The 9 PM `workers/notify_evening.py` cron joins `push_subscriptions` against the most recent `predictions` row per user and sends the forecast via `pywebpush`. The service worker (`frontend/public/sw.js`) handles `push` and `notificationclick` events.
+
 ## Environment
 
-`backend/.env.example` lists the required vars: `DATABASE_URL`, `SUPABASE_JWT_SECRET`, `WHOOP_CLIENT_ID/SECRET/REDIRECT_URI/WEBHOOK_SECRET`, `ANTHROPIC_API_KEY`, `VAPID_PRIVATE_KEY`, `USER_TIMEZONE`. Never commit a populated `.env`. Frontend uses `NEXT_PUBLIC_API_URL` to point at the backend.
+`backend/.env.example` lists the required vars: `DATABASE_URL`, `SUPABASE_JWT_SECRET`, `WHOOP_CLIENT_ID/SECRET/REDIRECT_URI/WEBHOOK_SECRET`, `ANTHROPIC_API_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, `USER_TIMEZONE`. Never commit a populated `.env`. Frontend uses `NEXT_PUBLIC_API_URL` to point at the backend, and `NEXT_PUBLIC_VAPID_PUBLIC_KEY` to enable the push-subscription UI (button hides itself when unset). Generate the VAPID keypair once with `pip install py-vapid && vapid --gen` — see `backend/CRONS.md` for the full flow.
 
 CORS in `api/main.py` allows `http://localhost:3000` and `https://*.vercel.app` — extend the regex if deploying to a different host.
 

@@ -172,6 +172,22 @@ CREATE TABLE goals (
 );
 
 -- ──────────────────────────────────────────────────────────────────────────────
+-- Web Push (Day 15): one row per browser subscription. `endpoint` is the
+-- natural unique key returned by PushManager. Worker `notify_evening.py`
+-- iterates these at 9 PM and sends via VAPID.
+-- ──────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE push_subscriptions (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint    TEXT NOT NULL UNIQUE,
+  p256dh      TEXT NOT NULL,
+  auth        TEXT NOT NULL,
+  user_agent  TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ──────────────────────────────────────────────────────────────────────────────
 -- Indexes for hot read paths
 -- ──────────────────────────────────────────────────────────────────────────────
 
@@ -183,3 +199,4 @@ CREATE INDEX idx_checkins_user_day    ON checkins(user_id, day DESC);
 CREATE INDEX idx_predictions_user_day ON predictions(user_id, target_day DESC);
 CREATE INDEX idx_shap_prediction      ON shap_values(prediction_id);
 CREATE INDEX idx_goals_user_day       ON goals(user_id, target_day DESC);
+CREATE INDEX idx_push_subs_user       ON push_subscriptions(user_id);

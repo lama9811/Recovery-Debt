@@ -3,7 +3,7 @@
 // not implemented (would need Workbox/Serwist + cache invalidation strategy);
 // the manifest + this SW are enough for the app to be installable as a PWA.
 
-self.addEventListener("install", (event) => {
+self.addEventListener("install", () => {
   self.skipWaiting();
 });
 

@@ -141,7 +141,7 @@ export default function Wallet() {
 
           <p className="mt-8 max-w-2xl text-[12px] leading-relaxed text-[color:var(--rd-fg-muted)]">
             <span className="rd-eyebrow mr-2">Honesty</span>
-            "Cost" and "deposit" labels describe the model's prediction, not a
+            &ldquo;Cost&rdquo; and &ldquo;deposit&rdquo; labels describe the model&apos;s prediction, not a
             causal effect on your body.
           </p>
         </div>
