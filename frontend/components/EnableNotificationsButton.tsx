@@ -20,15 +20,32 @@ type Status = BaseStatus | Override;
 
 const noopSubscribe = () => () => {};
 
-function getBrowserSnapshot(): BaseStatus {
-  const s = detectSupport();
-  if (!s.supported) return { kind: "unsupported", reason: s.reason };
-  if (s.permission === "granted") return { kind: "granted" };
-  if (s.permission === "denied") return { kind: "denied" };
-  return { kind: "idle" };
+// useSyncExternalStore requires snapshots to be reference-stable across calls
+// for the same logical state — otherwise React detects a change every render
+// and warns "should be cached to avoid an infinite loop". So we keep one
+// frozen object per possible state and return it.
+const STATUS_LOADING: BaseStatus = { kind: "loading" };
+const STATUS_IDLE: BaseStatus = { kind: "idle" };
+const STATUS_GRANTED: BaseStatus = { kind: "granted" };
+const STATUS_DENIED: BaseStatus = { kind: "denied" };
+
+let unsupportedCache: { reason: string; status: BaseStatus } | null = null;
+function unsupportedSnapshot(reason: string): BaseStatus {
+  if (unsupportedCache?.reason !== reason) {
+    unsupportedCache = { reason, status: { kind: "unsupported", reason } };
+  }
+  return unsupportedCache.status;
 }
 
-const getServerSnapshot = (): BaseStatus => ({ kind: "loading" });
+function getBrowserSnapshot(): BaseStatus {
+  const s = detectSupport();
+  if (!s.supported) return unsupportedSnapshot(s.reason);
+  if (s.permission === "granted") return STATUS_GRANTED;
+  if (s.permission === "denied") return STATUS_DENIED;
+  return STATUS_IDLE;
+}
+
+const getServerSnapshot = (): BaseStatus => STATUS_LOADING;
 
 export function EnableNotificationsButton() {
   const base = useSyncExternalStore(

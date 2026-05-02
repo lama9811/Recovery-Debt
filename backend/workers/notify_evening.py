@@ -77,11 +77,30 @@ async def _send_one(
         return True
 
 
+def _load_vapid_private_key() -> str:
+    """Read the VAPID private key from env.
+
+    Accepts either an inline PEM string (with literal `\\n` or real newlines)
+    or a filesystem path to a `.pem` file. The file-path form is convenient
+    for local dev (`VAPID_PRIVATE_KEY=./vapid_private.pem`); production
+    platforms like Railway support multi-line env values so the inline form
+    works there too.
+    """
+    raw = os.environ.get("VAPID_PRIVATE_KEY", "").strip()
+    if not raw:
+        return ""
+    if os.path.isfile(raw):
+        from pathlib import Path
+
+        return Path(raw).read_text()
+    return raw.replace("\\n", "\n")
+
+
 async def main() -> None:
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
         raise SystemExit("DATABASE_URL is not set")
-    vapid_private_key = os.environ.get("VAPID_PRIVATE_KEY", "").strip()
+    vapid_private_key = _load_vapid_private_key()
     vapid_subject = os.environ.get("VAPID_SUBJECT", "").strip()
     if not vapid_private_key or not vapid_subject:
         logger.warning("VAPID_PRIVATE_KEY/VAPID_SUBJECT unset — skipping push send")

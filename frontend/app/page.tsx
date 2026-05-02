@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import { CheckinCTA } from "@/components/CheckinCTA";
 import { ConfidenceLabel } from "@/components/ConfidenceLabel";
 import { EnableNotificationsButton } from "@/components/EnableNotificationsButton";
 import { ErrorState } from "@/components/ErrorState";
@@ -176,6 +177,11 @@ export default function Home() {
               </Link>
               <EnableNotificationsButton />
             </div>
+          </section>
+
+          {/* Daily check-in CTA */}
+          <section className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-3">
+            <CheckinCTA />
           </section>
 
           {/* Ledger */}
