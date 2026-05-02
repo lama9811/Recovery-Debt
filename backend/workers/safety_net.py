@@ -37,8 +37,7 @@ async def main() -> None:
             user_id = row["id"]
             try:
                 counts = await backfill_user(conn, user_id, days=3)
-                logger.info("safety_net user=%s email=%s counts=%s",
-                            user_id, row["email"], counts)
+                logger.info("safety_net user=%s email=%s counts=%s", user_id, row["email"], counts)
             except Exception:
                 logger.exception("safety_net failed for user=%s", user_id)
     finally:

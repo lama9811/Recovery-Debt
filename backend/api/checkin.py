@@ -75,7 +75,13 @@ async def submit(body: CheckinBody) -> dict[str, Any]:
               traveling      = EXCLUDED.traveling,
               updated_at     = NOW()
             """,
-            user_id, day, body.alcohol_drinks, body.caffeine_mg, body.stress_1to10,
-            body.late_meal, body.ill, body.traveling,
+            user_id,
+            day,
+            body.alcohol_drinks,
+            body.caffeine_mg,
+            body.stress_1to10,
+            body.late_meal,
+            body.ill,
+            body.traveling,
         )
     return {"ok": True, "day": day.isoformat()}

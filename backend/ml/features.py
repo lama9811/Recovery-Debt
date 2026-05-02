@@ -97,15 +97,13 @@ def build_feature_matrix(daily: pd.DataFrame) -> pd.DataFrame:
     df["late_meal_int"] = df["late_meal"].astype("float").fillna(0.0)
     df["ill_int"] = df["ill"].astype("float").fillna(0.0)
     df["traveling_int"] = df["traveling"].astype("float").fillna(0.0)
-    df["is_weekend"] = (
-        pd.to_datetime(df.index).dayofweek.isin([5, 6]).astype("float")
-    )
+    df["is_weekend"] = pd.to_datetime(df.index).dayofweek.isin([5, 6]).astype("float")
 
     # was_missing flags — three coarse bands rather than per-column to keep
     # the model identifiable on small datasets.
-    df["missing_checkin"] = df[
-        ["alcohol_drinks", "caffeine_mg", "stress_1to10"]
-    ].isna().any(axis=1).astype("float")
+    df["missing_checkin"] = (
+        df[["alcohol_drinks", "caffeine_mg", "stress_1to10"]].isna().any(axis=1).astype("float")
+    )
     df["missing_sleep"] = df["sleep_h"].isna().astype("float")
     df["missing_strain"] = df["strain"].isna().astype("float")
 

@@ -23,9 +23,7 @@ class ExplainedPrediction:
     contributions: dict[str, float]  # feature_name -> contribution
 
     def integrity_residual(self) -> float:
-        return abs(
-            self.base_value + sum(self.contributions.values()) - self.prediction
-        )
+        return abs(self.base_value + sum(self.contributions.values()) - self.prediction)
 
 
 def make_explainer(pipeline: Pipeline, X_train: pd.DataFrame) -> shap.LinearExplainer:

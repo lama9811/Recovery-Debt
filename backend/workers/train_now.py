@@ -69,13 +69,9 @@ async def main() -> None:
         raise SystemExit("DATABASE_URL is not set")
     conn = await asyncpg.connect(dsn)
     try:
-        user_id = await conn.fetchval(
-            "SELECT id FROM users WHERE email = $1", DEMO_EMAIL
-        )
+        user_id = await conn.fetchval("SELECT id FROM users WHERE email = $1", DEMO_EMAIL)
         if user_id is None:
-            raise SystemExit(
-                "Demo user not found — run `python -m synth.generator` first"
-            )
+            raise SystemExit("Demo user not found — run `python -m synth.generator` first")
 
         daily = await fetch_daily(conn, user_id)
         print(f"daily rows: {len(daily)}")
@@ -111,10 +107,7 @@ async def main() -> None:
         explainer = make_explainer(result.pipeline, result.X_train)
         ep = explain_one(result.pipeline, explainer, FEATURE_COLUMNS, latest_row)
         residual = ep.integrity_residual()
-        print(
-            f"prediction={ep.prediction:.2f} base={ep.base_value:.2f} "
-            f"|residual|={residual:.4f}"
-        )
+        print(f"prediction={ep.prediction:.2f} base={ep.base_value:.2f} |residual|={residual:.4f}")
         if residual > 0.01:
             raise SystemExit(
                 f"SHAP integrity check failed (residual={residual:.4f}) — "
@@ -128,7 +121,10 @@ async def main() -> None:
             VALUES ($1, $2, $3, $4)
             RETURNING id
             """,
-            user_id, target_day, ep.prediction, version,
+            user_id,
+            target_day,
+            ep.prediction,
+            version,
         )
         # Wipe old shap rows for this prediction (idempotency on rerun)
         await conn.execute("DELETE FROM shap_values WHERE prediction_id = $1", prediction_id)
@@ -139,7 +135,10 @@ async def main() -> None:
                     INSERT INTO shap_values (prediction_id, feature_name, contribution, base_value)
                     VALUES ($1, $2, $3, $4)
                     """,
-                    prediction_id, feat, float(contrib), float(ep.base_value),
+                    prediction_id,
+                    feat,
+                    float(contrib),
+                    float(ep.base_value),
                 )
         print(f"wrote prediction {prediction_id} for {target_day}")
     finally:

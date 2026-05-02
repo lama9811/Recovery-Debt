@@ -6,11 +6,10 @@ explainer was fit on the wrong reference data.
 
 from __future__ import annotations
 
-from tests.test_features import _toy_daily
-
 from ml.explain import explain_one, make_explainer
 from ml.features import FEATURE_COLUMNS, build_feature_matrix
 from ml.train import train_ridge
+from tests.test_features import _toy_daily
 
 
 def test_shap_integrity() -> None:

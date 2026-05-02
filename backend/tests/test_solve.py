@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from tests.test_features import _toy_daily
-
 from ml.features import build_feature_matrix
 from ml.solve import PHYSIOLOGICAL_BOUNDS, solve_for_target
 from ml.train import train_ridge
+from tests.test_features import _toy_daily
 
 
 def test_solve_feasible_returns_actions() -> None:
@@ -17,9 +16,7 @@ def test_solve_feasible_returns_actions() -> None:
     for a in sr.actions:
         if a.feature in PHYSIOLOGICAL_BOUNDS:
             lo, hi = PHYSIOLOGICAL_BOUNDS[a.feature]
-            assert lo - 1e-3 <= a.value <= hi + 1e-3, (
-                f"{a.feature}={a.value} outside [{lo},{hi}]"
-            )
+            assert lo - 1e-3 <= a.value <= hi + 1e-3, f"{a.feature}={a.value} outside [{lo},{hi}]"
 
 
 def test_solve_infeasible_surfaces_reason() -> None:
