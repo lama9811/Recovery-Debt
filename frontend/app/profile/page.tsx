@@ -97,7 +97,7 @@ export default function Profile() {
               How your body responds, per unit.
             </h1>
             <p className="mt-3 max-w-xl text-[14px] leading-7 text-[color:var(--rd-fg-muted)]">
-              Each bar is a Ridge coefficient in the model's natural units —
+              Each bar is a Ridge coefficient in the model&apos;s natural units —
               points of recovery per hour of sleep, per drink, per strain unit.
               Whiskers show the IQR across recent retrains.
             </p>

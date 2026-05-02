@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { ConfidenceLabel } from "@/components/ConfidenceLabel";
+import { EnableNotificationsButton } from "@/components/EnableNotificationsButton";
 import { ErrorState } from "@/components/ErrorState";
 import { Nav } from "@/components/Nav";
 import { apiGet } from "@/lib/api";
@@ -134,7 +135,7 @@ export default function Home() {
             </div>
             <div className="rd-card flex flex-col gap-4">
               <div className="flex items-center justify-between">
-                <span className="rd-eyebrow">Tomorrow's forecast</span>
+                <span className="rd-eyebrow">Tomorrow&apos;s forecast</span>
                 {receipt ? (
                   <ConfidenceLabel nDays={receipt.n_training_days} />
                 ) : null}
@@ -173,6 +174,7 @@ export default function Home() {
               >
                 Plan a target →
               </Link>
+              <EnableNotificationsButton />
             </div>
           </section>
 
@@ -248,7 +250,7 @@ export default function Home() {
             <p className="max-w-2xl text-[12px] leading-relaxed text-[color:var(--rd-fg-muted)]">
               <span className="rd-eyebrow mr-2">Honesty</span>
               On days you logged alcohol, the model predicted lower recovery.
-              That's the model's pattern, not a medical claim.
+              That&apos;s the model&apos;s pattern, not a medical claim.
             </p>
           </section>
         </div>
