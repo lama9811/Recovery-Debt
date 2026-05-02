@@ -108,26 +108,32 @@ npm run dev   # http://localhost:3000
 ### Pre-commit gate
 
 ```bash
-cd backend  && pytest -x
+cd backend  && ruff check . && pytest -x
 cd frontend && npm run lint && npm run build
 ```
+
+Current state on `feat/days-6-15-ml-pipeline-and-ui`: ✅ ruff clean ·
+✅ 7/7 pytest pass · ✅ eslint clean · ✅ `next build` produces 8 static
+routes including `/manifest.webmanifest`.
 
 ## Architecture (one-request lifecycle)
 
 ```
-WHOOP OAuth → tokens in Supabase
+WHOOP OAuth (api/whoop.py) → tokens in Supabase
   ↓
-backfill + webhooks + 4 AM cron populate recoveries / cycles / sleeps / workouts
+workers/backfill.py + api/webhooks.py + 4 AM workers/safety_net.py
+  populate recoveries / cycles / sleeps / workouts
   ↓
 daily checkin (POST /api/checkin) writes to checkins
   ↓
-nightly cron (workers/nightly_train.py)
-  └─ build_feature_matrix → RidgeCV(TimeSeriesSplit) → pickle to ml/artifacts/
-  └─ shap.LinearExplainer → write per-feature contributions to shap_values
+nightly retrain (workers/train_now.py, scheduled per backend/CRONS.md)
+  ├─ build_feature_matrix → RidgeCV(TimeSeriesSplit) → pickle to ml/artifacts/
+  └─ shap.LinearExplainer → per-feature contributions to shap_values
   ↓
-frontend reads predictions + receipts via FastAPI
+FastAPI api/data.py reads predictions + receipts:
+  GET /api/dashboard | GET /api/receipt | GET /api/profile | GET /api/wallet
   ↓
-inverse planner (api/goals.py → ml/solve.py) on demand
+inverse planner (POST /api/plan → ml/solve.py) on demand
 ```
 
 ## Honesty rules (PRD §13 — enforced in UI copy)
@@ -148,3 +154,15 @@ inverse planner (api/goals.py → ml/solve.py) on demand
 - Frontend: not yet deployed
 - Database: Supabase Postgres
 - Repo: `lama9811/Recovery-Debt`, default branch `main`
+
+## Notes
+
+- The PWA service worker (`frontend/public/sw.js`) only registers when
+  `NODE_ENV === "production"` — to install the app on a phone home
+  screen locally, run `npm run build && npm run start` rather than
+  `npm run dev`.
+- `frontend/next.config.ts` sets `nosniff`, `Referrer-Policy`, and
+  `Cache-Control: no-cache` on `/sw.js` so updates ship instantly.
+- The `:8000` and `:3000` dev servers can persist between sessions; if
+  `next dev` reports "Port 3000 is in use", `lsof -i :3000` then
+  `kill <PID>` clears the squatter.
