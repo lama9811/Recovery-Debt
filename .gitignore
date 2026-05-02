@@ -23,6 +23,10 @@ __pycache__/
 # ML artifacts (pickled pipelines)
 backend/ml/artifacts/
 
+# VAPID keypair — private MUST NEVER be committed.
+backend/vapid_private.pem
+backend/vapid_public.txt
+
 # OS / editor
 .DS_Store
 .idea/
