@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from db.client import get_pool
 from ml.explain import explain_one, make_explainer
 from ml.features import FEATURE_COLUMNS, build_feature_matrix
-from ml.solve import ACTIONABLE, solve_for_target
+from ml.solve import solve_for_target
 from ml.train import latest_artifact
 
 router = APIRouter(prefix="/api", tags=["data"])
@@ -33,7 +33,7 @@ async def _get_user_id() -> UUID:
     if not row:
         raise HTTPException(
             status_code=404,
-            detail="Demo user not found — run `python -m synth.generator` then `python -m workers.train_now`",
+            detail="Demo user not found — run `python -m synth.generator` then `python -m workers.train_now`",  # noqa: E501
         )
     return row["id"]
 
@@ -92,7 +92,9 @@ async def dashboard() -> dict[str, Any]:
     for r in daily.tail(180).itertuples(index=False):
         days.append(
             {
-                "day": r.day.isoformat() if isinstance(r.day, (dt.date, dt.datetime)) else str(r.day),
+                "day": (
+                    r.day.isoformat() if isinstance(r.day, (dt.date, dt.datetime)) else str(r.day)
+                ),
                 "recovery": int(r.recovery_score) if r.recovery_score is not None else None,
                 "hrv": float(r.hrv_rmssd_ms) if r.hrv_rmssd_ms is not None else None,
                 "rhr": int(r.rhr_bpm) if r.rhr_bpm is not None else None,
@@ -132,9 +134,7 @@ async def receipt() -> dict[str, Any]:
         "target_day": target_day,
         "predicted_recovery": round(ep.prediction, 1),
         "base_value": round(ep.base_value, 1),
-        "top_contributors": [
-            {"feature": f, "contribution": round(c, 2)} for f, c in contribs
-        ],
+        "top_contributors": [{"feature": f, "contribution": round(c, 2)} for f, c in contribs],
         "n_training_days": art["metrics"]["n_train_days"],
         "model_version": art["version"],
         "early_estimate": art["metrics"]["n_train_days"] < 60,
@@ -203,7 +203,8 @@ async def plan(body: PlanBody) -> dict[str, Any]:
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO goals (user_id, target_day, target_recovery, solved_plan, infeasibility_reason)
+            INSERT INTO goals
+                (user_id, target_day, target_recovery, solved_plan, infeasibility_reason)
             VALUES ($1, $2, $3, $4::jsonb, $5)
             """,
             user_id,
@@ -269,8 +270,17 @@ async def wallet() -> dict[str, Any]:
 
     # Bucket features into recruiter-readable categories
     categories = {
-        "Sleep": ["sleep_h", "sleep_h_lag1", "sleep_h_lag2", "sleep_h_roll3", "sleep_h_roll7",
-                  "efficiency_pct", "consistency_pct", "deep_frac", "rem_frac"],
+        "Sleep": [
+            "sleep_h",
+            "sleep_h_lag1",
+            "sleep_h_lag2",
+            "sleep_h_roll3",
+            "sleep_h_roll7",
+            "efficiency_pct",
+            "consistency_pct",
+            "deep_frac",
+            "rem_frac",
+        ],
         "Strain": ["strain_lag1", "strain_lag2", "strain_roll3", "strain_roll7"],
         "Alcohol": ["alcohol_drinks", "alcohol_lag1", "alcohol_roll7"],
         "Stress": ["stress_1to10"],

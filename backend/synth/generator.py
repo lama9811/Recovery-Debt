@@ -55,11 +55,7 @@ def simulate(n_days: int, seed: int = 42) -> list[dict]:
 
         # Sleep — pulled down by stress, alcohol, late meals
         sleep_target = (
-            7.7
-            - 0.45 * (stress >= 8)
-            - 0.4 * (alcohol > 0)
-            - 0.2 * late_meal
-            - 0.3 * traveling
+            7.7 - 0.45 * (stress >= 8) - 0.4 * (alcohol > 0) - 0.2 * late_meal - 0.3 * traveling
         )
         sleep_h = float(np.clip(rng.normal(sleep_target, 0.75), 4.5, 10.5))
         sleep_total_ms = int(sleep_h * 3_600_000)
@@ -189,7 +185,12 @@ async def upsert_rows(conn: asyncpg.Connection, user_id: UUID, rows: list[dict])
                   spo2_pct       = EXCLUDED.spo2_pct,
                   skin_temp_c    = EXCLUDED.skin_temp_c
                 """,
-                user_id, r["day"], r["recovery"], r["hrv"], r["rhr"], r["spo2"],
+                user_id,
+                r["day"],
+                r["recovery"],
+                r["hrv"],
+                r["rhr"],
+                r["spo2"],
                 r["skin_temp"],
             )
             await conn.execute(
@@ -203,7 +204,12 @@ async def upsert_rows(conn: asyncpg.Connection, user_id: UUID, rows: list[dict])
                   avg_hr_bpm = EXCLUDED.avg_hr_bpm,
                   max_hr_bpm = EXCLUDED.max_hr_bpm
                 """,
-                user_id, r["day"], r["strain"], r["kilojoule"], r["avg_hr"], r["max_hr"],
+                user_id,
+                r["day"],
+                r["strain"],
+                r["kilojoule"],
+                r["avg_hr"],
+                r["max_hr"],
             )
             await conn.execute(
                 """
@@ -224,9 +230,18 @@ async def upsert_rows(conn: asyncpg.Connection, user_id: UUID, rows: list[dict])
                   sleep_need_ms    = EXCLUDED.sleep_need_ms,
                   disturbances     = EXCLUDED.disturbances
                 """,
-                user_id, r["day"], r["in_bed_ms"], r["awake_ms"], r["light_ms"],
-                r["deep_ms"], r["rem_ms"], r["efficiency"], r["consistency"],
-                r["resp_rate"], r["sleep_need_ms"], r["disturbances"],
+                user_id,
+                r["day"],
+                r["in_bed_ms"],
+                r["awake_ms"],
+                r["light_ms"],
+                r["deep_ms"],
+                r["rem_ms"],
+                r["efficiency"],
+                r["consistency"],
+                r["resp_rate"],
+                r["sleep_need_ms"],
+                r["disturbances"],
             )
             await conn.execute(
                 """
@@ -242,8 +257,14 @@ async def upsert_rows(conn: asyncpg.Connection, user_id: UUID, rows: list[dict])
                   ill            = EXCLUDED.ill,
                   traveling      = EXCLUDED.traveling
                 """,
-                user_id, r["day"], r["alcohol"], r["caffeine"], r["stress"],
-                r["late_meal"], r["ill"], r["traveling"],
+                user_id,
+                r["day"],
+                r["alcohol"],
+                r["caffeine"],
+                r["stress"],
+                r["late_meal"],
+                r["ill"],
+                r["traveling"],
             )
 
 
@@ -258,10 +279,7 @@ async def main(n_days: int, seed: int) -> None:
         await upsert_rows(conn, user_id, rows)
     finally:
         await conn.close()
-    print(
-        f"seeded user={user_id} days={len(rows)} "
-        f"first={rows[0]['day']} last={rows[-1]['day']}"
-    )
+    print(f"seeded user={user_id} days={len(rows)} first={rows[0]['day']} last={rows[-1]['day']}")
 
 
 if __name__ == "__main__":

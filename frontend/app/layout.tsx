@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, Inter_Tight, JetBrains_Mono } from "next/font/google";
+import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import "./globals.css";
 
 // Display — Fraunces is a variable font; we opt into the SOFT and WONK axes
@@ -64,7 +65,10 @@ export default function RootLayout({
       data-typeface="fraunces"
       className={`${fraunces.variable} ${interTight.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
-      <body className="rd-grain min-h-full flex flex-col">{children}</body>
+      <body className="rd-grain min-h-full flex flex-col">
+        <ServiceWorkerRegister />
+        {children}
+      </body>
     </html>
   );
 }

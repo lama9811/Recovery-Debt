@@ -61,7 +61,7 @@ reachable is X because Y is at its physiological bound."
 | 4 | **WHOOP webhooks** — HMAC-SHA256 verified, async re-pull of last 3 days | `backend/api/webhooks.py` |
 | 4 | **Safety-net cron** — re-pull last 3 days for every connected user | `backend/workers/safety_net.py` |
 | 10 | **Nightly retrain cron config** — Railway dashboard schedule for `train_now.py` | `backend/CRONS.md` |
-| 15 | **PWA install** — manifest.ts, SVG icons, iOS-friendly viewport. Tested in `npm run build`. | `frontend/app/manifest.ts`, `frontend/public/icon*.svg` |
+| 15 | **PWA install** — manifest.ts, SVG icons, iOS-friendly viewport, service worker (push-ready, registered in production builds) | `frontend/app/manifest.ts`, `frontend/public/sw.js`, `frontend/components/ServiceWorkerRegister.tsx` |
 
 ### Tier-1 differentiation features (CLAUDE.md §"Tier-1") — all built
 
@@ -77,7 +77,7 @@ reachable is X because Y is at its physiological bound."
 | 5 | Frontend deploy to Vercel | First push triggered build; type fixes shipped |
 | 10 | Add Railway cron schedules from `backend/CRONS.md` | One-time setup in Railway dashboard |
 | 14 | Stable IQR whiskers from real history (need ≥10 model versions) | UI shows placeholder bands until then |
-| 15 | Push notification at 9 PM | VAPID key already in `.env.example`; needs subscribe flow |
+| 15 | Push notification at 9 PM | Service worker push handler is wired (`public/sw.js`); subscribe flow + 9 PM cron + `web-push` server action are deferred |
 | 15 | Loom walkthrough | After demo data is in production |
 
 ### 🔒 Load-bearing invariants (CLAUDE.md — guarded by tests)

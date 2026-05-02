@@ -75,7 +75,10 @@ async def _refresh_if_needed(
         SET access_token = $2, refresh_token = $3, expires_at = $4, updated_at = NOW()
         WHERE user_id = $1
         """,
-        user_id, new_access, new_refresh, new_expires_at,
+        user_id,
+        new_access,
+        new_refresh,
+        new_expires_at,
     )
     return new_access
 
@@ -86,9 +89,7 @@ def _to_day(iso_ts: str | None) -> dt.date | None:
     return dt.datetime.fromisoformat(iso_ts.replace("Z", "+00:00")).date()
 
 
-async def _paged(
-    client: httpx.AsyncClient, path: str, start_iso: str, end_iso: str
-):
+async def _paged(client: httpx.AsyncClient, path: str, start_iso: str, end_iso: str):
     next_token: str | None = None
     while True:
         params: dict[str, Any] = {"start": start_iso, "end": end_iso, "limit": PAGE_LIMIT}
@@ -110,8 +111,11 @@ async def _paged(
 
 
 async def backfill_recoveries(
-    conn: asyncpg.Connection, client: httpx.AsyncClient, user_id: UUID,
-    start_iso: str, end_iso: str,
+    conn: asyncpg.Connection,
+    client: httpx.AsyncClient,
+    user_id: UUID,
+    start_iso: str,
+    end_iso: str,
 ) -> int:
     n = 0
     async for rec in _paged(client, "/v1/recovery", start_iso, end_iso):
@@ -134,7 +138,8 @@ async def backfill_recoveries(
               skin_temp_c    = EXCLUDED.skin_temp_c,
               score_state    = EXCLUDED.score_state
             """,
-            user_id, day,
+            user_id,
+            day,
             score.get("recovery_score"),
             score.get("hrv_rmssd_milli"),
             score.get("resting_heart_rate"),
@@ -147,8 +152,11 @@ async def backfill_recoveries(
 
 
 async def backfill_cycles(
-    conn: asyncpg.Connection, client: httpx.AsyncClient, user_id: UUID,
-    start_iso: str, end_iso: str,
+    conn: asyncpg.Connection,
+    client: httpx.AsyncClient,
+    user_id: UUID,
+    start_iso: str,
+    end_iso: str,
 ) -> int:
     n = 0
     async for rec in _paged(client, "/v1/cycle", start_iso, end_iso):
@@ -171,12 +179,14 @@ async def backfill_cycles(
               end_ts      = EXCLUDED.end_ts,
               score_state = EXCLUDED.score_state
             """,
-            user_id, day,
+            user_id,
+            day,
             score.get("strain"),
             score.get("kilojoule"),
             score.get("average_heart_rate"),
             score.get("max_heart_rate"),
-            rec.get("start"), rec.get("end"),
+            rec.get("start"),
+            rec.get("end"),
             rec.get("score_state"),
         )
         n += 1
@@ -184,8 +194,11 @@ async def backfill_cycles(
 
 
 async def backfill_sleeps(
-    conn: asyncpg.Connection, client: httpx.AsyncClient, user_id: UUID,
-    start_iso: str, end_iso: str,
+    conn: asyncpg.Connection,
+    client: httpx.AsyncClient,
+    user_id: UUID,
+    start_iso: str,
+    end_iso: str,
 ) -> int:
     n = 0
     async for rec in _paged(client, "/v1/activity/sleep", start_iso, end_iso):
@@ -216,7 +229,8 @@ async def backfill_sleeps(
               end_ts           = EXCLUDED.end_ts,
               score_state      = EXCLUDED.score_state
             """,
-            user_id, day,
+            user_id,
+            day,
             stage.get("total_in_bed_time_milli"),
             stage.get("total_awake_time_milli"),
             stage.get("total_light_sleep_time_milli"),
@@ -227,7 +241,8 @@ async def backfill_sleeps(
             score.get("respiratory_rate"),
             stage.get("sleep_needed_milli"),
             stage.get("disturbance_count"),
-            rec.get("start"), rec.get("end"),
+            rec.get("start"),
+            rec.get("end"),
             rec.get("score_state"),
         )
         n += 1
@@ -235,8 +250,11 @@ async def backfill_sleeps(
 
 
 async def backfill_workouts(
-    conn: asyncpg.Connection, client: httpx.AsyncClient, user_id: UUID,
-    start_iso: str, end_iso: str,
+    conn: asyncpg.Connection,
+    client: httpx.AsyncClient,
+    user_id: UUID,
+    start_iso: str,
+    end_iso: str,
 ) -> int:
     n = 0
     async for rec in _paged(client, "/v1/activity/workout", start_iso, end_iso):
@@ -266,8 +284,11 @@ async def backfill_workouts(
               zone_durations = EXCLUDED.zone_durations,
               score_state    = EXCLUDED.score_state
             """,
-            user_id, int(whoop_id), day,
-            rec.get("start"), rec.get("end"),
+            user_id,
+            int(whoop_id),
+            day,
+            rec.get("start"),
+            rec.get("end"),
             score.get("strain"),
             rec.get("sport_id"),
             score.get("average_heart_rate"),
@@ -281,9 +302,7 @@ async def backfill_workouts(
     return n
 
 
-async def backfill_user(
-    conn: asyncpg.Connection, user_id: UUID, days: int = 180
-) -> dict[str, int]:
+async def backfill_user(conn: asyncpg.Connection, user_id: UUID, days: int = 180) -> dict[str, int]:
     end = dt.datetime.now(dt.UTC)
     start = end - dt.timedelta(days=days)
     start_iso = start.isoformat().replace("+00:00", "Z")
@@ -311,9 +330,7 @@ async def main(email: str | None, days: int) -> None:
     conn = await asyncpg.connect(dsn)
     try:
         if email:
-            user_id = await conn.fetchval(
-                "SELECT id FROM users WHERE email = $1", email
-            )
+            user_id = await conn.fetchval("SELECT id FROM users WHERE email = $1", email)
         else:
             user_id = await conn.fetchval(
                 """
@@ -324,9 +341,7 @@ async def main(email: str | None, days: int) -> None:
                 """
             )
         if not user_id:
-            raise SystemExit(
-                "No WHOOP-connected user found. Click 'Connect WHOOP' first."
-            )
+            raise SystemExit("No WHOOP-connected user found. Click 'Connect WHOOP' first.")
         counts = await backfill_user(conn, user_id, days=days)
         print(f"backfilled user={user_id} {counts}")
     finally:

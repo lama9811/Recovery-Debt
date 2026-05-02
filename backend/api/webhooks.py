@@ -13,7 +13,6 @@ import hmac
 import logging
 import os
 
-import asyncpg
 from fastapi import APIRouter, HTTPException, Request
 
 from db.client import get_pool
@@ -33,9 +32,7 @@ def _verify_signature(secret: str, body: bytes, header_signature: str) -> bool:
 async def webhook(request: Request) -> dict[str, bool]:
     secret = os.environ.get("WHOOP_WEBHOOK_SECRET", "").strip()
     body = await request.body()
-    sig = request.headers.get("X-WHOOP-Signature") or request.headers.get(
-        "x-whoop-signature", ""
-    )
+    sig = request.headers.get("X-WHOOP-Signature") or request.headers.get("x-whoop-signature", "")
 
     # Reject unauthenticated callbacks. In dev, leaving the secret empty disables
     # the gate so you can curl-test the endpoint locally.

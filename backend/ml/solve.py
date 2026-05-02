@@ -104,7 +104,7 @@ def solve_for_target(
     actionable_idx = [FEATURE_COLUMNS.index(f) for f in ACTIONABLE]
 
     def predict(x: np.ndarray) -> float:
-        row = pd.DataFrame([dict(zip(FEATURE_COLUMNS, x))])
+        row = pd.DataFrame([dict(zip(FEATURE_COLUMNS, x, strict=True))])
         return float(pipeline.predict(row)[0])
 
     bounds = []
@@ -116,7 +116,7 @@ def solve_for_target(
 
     # Step 1: try to hit target with minimal deviation
     def objective(x):
-        diff = (x[actionable_idx] - baseline[actionable_idx])
+        diff = x[actionable_idx] - baseline[actionable_idx]
         return float(diff @ diff)
 
     def grad(x):

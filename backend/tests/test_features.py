@@ -6,7 +6,6 @@ import datetime as dt
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from ml.features import FEATURE_COLUMNS, TARGET, build_feature_matrix
 from ml.train import train_ridge
@@ -25,12 +24,17 @@ def _toy_daily(n: int = 90, seed: int = 0) -> pd.DataFrame:
     deep_ms = (sleep_h * 3.6e6 * 0.16).astype(int)
     rem_ms = (sleep_h * 3.6e6 * 0.22).astype(int)
     recovery = (
-        50
-        + 0.55 * (hrv - 55)
-        + 4.5 * (sleep_h - 7.5)
-        - 11 * (alcohol > 0)
-        + rng.normal(0, 3, size=n)
-    ).clip(0, 100).round().astype(int)
+        (
+            50
+            + 0.55 * (hrv - 55)
+            + 4.5 * (sleep_h - 7.5)
+            - 11 * (alcohol > 0)
+            + rng.normal(0, 3, size=n)
+        )
+        .clip(0, 100)
+        .round()
+        .astype(int)
+    )
     return pd.DataFrame(
         {
             "day": days,
