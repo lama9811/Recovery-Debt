@@ -29,7 +29,15 @@ async def lifespan(app: FastAPI):
         await open_pool()
         pool_opened = True
         logger.info("DB pool opened")
-    except Exception:
+    except Exception as exc:
+        # Print as well as log so the failure shows up even if uvicorn's
+        # log config silences our `recovery_debt` logger. The traceback is
+        # the single most useful diagnostic when production /health-200s
+        # but every DB endpoint 500s.
+        import traceback
+
+        print("DB pool open failed:", repr(exc), flush=True)
+        traceback.print_exc()
         logger.exception("DB pool open failed — continuing without DB")
     try:
         yield
@@ -59,3 +67,21 @@ app.include_router(push.router)
 @app.get("/health")
 async def health() -> dict[str, bool]:
     return {"ok": True}
+
+
+@app.get("/health/db")
+async def health_db() -> dict[str, object]:
+    """Deep health check — proves the pool actually opened and can SELECT 1.
+    Use this after a deploy to bisect 'app booted but DB is dead' issues."""
+    from db.client import get_pool
+
+    try:
+        pool = get_pool()
+    except RuntimeError as exc:
+        return {"ok": False, "stage": "pool", "error": str(exc)}
+    try:
+        async with pool.acquire() as conn:
+            v = await conn.fetchval("SELECT 1")
+        return {"ok": v == 1, "stage": "query"}
+    except Exception as exc:
+        return {"ok": False, "stage": "query", "error": repr(exc)}

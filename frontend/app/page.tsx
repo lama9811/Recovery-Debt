@@ -97,7 +97,7 @@ export default function Home() {
         <main className="px-10 pb-24 max-w-3xl">
           <ErrorState
             title="Backend not reachable"
-            hint={`${error}. Make sure the FastAPI server is running on :8000 and run \`python -m synth.generator && python -m workers.train_now\` to seed the demo user.`}
+            hint={`${error}. API URL: ${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000 (fallback — NEXT_PUBLIC_API_URL was unset at build time)"}. Locally, seed with \`python -m synth.generator && python -m workers.train_now\`.`}
           />
         </main>
       </div>
