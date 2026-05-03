@@ -2,6 +2,16 @@
 
 Held as a module-level singleton; opened on FastAPI startup, closed on shutdown.
 Endpoints depend on `get_pool()` so request-time lookups stay cheap.
+
+Why `statement_cache_size=0`:
+Supabase's direct host (`db.<ref>.supabase.co:5432`) is IPv6-only on most
+networks, and Railway containers don't have reliable IPv6 egress, so on
+production we connect through the IPv4 pooler (`*.pooler.supabase.com:6543`)
+which runs pgbouncer in transaction mode. asyncpg's prepared-statement cache
+is incompatible with transaction-mode pgbouncer (each query may land on a
+different backend), so we disable it. Setting this unconditionally is fine —
+direct connections just lose a small server-side cache, and we keep one DSN
+shape working in both local dev and prod.
 """
 
 from __future__ import annotations
@@ -20,7 +30,12 @@ async def open_pool() -> asyncpg.Pool:
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
         raise RuntimeError("DATABASE_URL is not set")
-    _pool = await asyncpg.create_pool(dsn, min_size=1, max_size=10)
+    _pool = await asyncpg.create_pool(
+        dsn,
+        min_size=1,
+        max_size=10,
+        statement_cache_size=0,
+    )
     return _pool
 
 
