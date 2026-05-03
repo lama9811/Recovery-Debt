@@ -32,10 +32,14 @@ Path aliases in `frontend/components.json`: `@/components`, `@/components/ui`, `
 - `backend/workers/backfill.py` — real-WHOOP 6-month pull with refresh-token grant.
 - `backend/workers/safety_net.py` — re-pull last 3 days for every user. 4 AM cron.
 - `backend/workers/train_now.py` — end-to-end retrain CLI (Day 10 cron entry point).
-- `backend/workers/notify_evening.py` — 9 PM Web Push: tomorrow's predicted recovery, with the PRD §13 "early estimate" label before 60 training days. Pure `build_evening_payload` is unit-tested; the I/O shell prunes 404/410 dead subscriptions and no-ops if `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` are unset.
+- `backend/workers/notify_evening.py` — 9 PM Web Push: tomorrow's predicted recovery, with the PRD §13 "early estimate" label before 60 training days. Pure `build_evening_payload` is unit-tested; the I/O shell prunes 404/410 dead subscriptions and no-ops if `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` are unset. `_load_vapid_private_key()` accepts either an inline PEM (with literal `\n` escapes for prod env vars) or a filesystem path (handy in local dev — point at `backend/vapid_private.pem`).
+- `backend/scripts/generate_vapid.py` — emits a P-256 ECDSA keypair using the `cryptography` lib (already a dep, no `py-vapid` needed). Writes `vapid_private.pem` + `vapid_public.txt`; both are gitignored.
 - `backend/api/data.py` — `/api/dashboard`, `/api/receipt`, `/api/whatif`, `/api/plan`, `/api/profile`, `/api/wallet`. All scoped to the demo user via `_get_user_id()`; swap that for a session lookup when real-user auth lands.
 - `backend/api/checkin.py` — `GET/POST /api/checkin`.
 - `backend/api/push.py` — `POST /api/push/subscribe` and `/unsubscribe`. Endpoint is the natural unique key on `push_subscriptions`; re-subscribes update in place.
+- `frontend/components/CheckinCTA.tsx` — dashboard card that fetches `/api/checkin` on mount and shows either "Log today's check-in" (button → `/checkin`) or "Logged ✓" (with edit link). Solves the "where's the check-in button?" UX problem (the nav tab was easy to miss).
+- `frontend/components/EnableNotificationsButton.tsx` — opt-in push subscribe flow. Uses `useSyncExternalStore` with **module-level cached snapshot objects** so React 19's `react-hooks/set-state-in-effect` rule is satisfied without disabling lints. Hides itself when `NEXT_PUBLIC_VAPID_PUBLIC_KEY` is unset.
+- `frontend/lib/push.ts` — `detectSupport()` + `enablePush()` helpers. `urlBase64ToUint8Array` returns `Uint8Array<ArrayBuffer>` (not the default `ArrayBufferLike`) to satisfy TS strict mode against `pushManager.subscribe`.
 - `backend/api/webhooks.py` — `POST /api/whoop/webhook` (HMAC-verified).
 - `backend/db/migrations/` — apply ordered SQL files to existing databases when `schema.sql` gains a table after the project has been deployed (e.g. `001_push_subscriptions.sql`).
 - `backend/CRONS.md` — Railway dashboard schedules (Railway crons aren't configured in `railway.json`; they're per-service in the UI).

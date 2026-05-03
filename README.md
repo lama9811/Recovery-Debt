@@ -56,12 +56,15 @@ reachable is X because Y is at its physiological bound."
 | 12 | What-If simulator (4 sliders → live counterfactual replay through current model) | `frontend/app/whatif/page.tsx`, `POST /api/whatif` |
 | 13 | **Inverse Planner** — SLSQP on Ridge coefficients with hard physiological bounds (sleep 5–10h, strain 0–21, alcohol = 0). Surfaces "closest reachable + which bound pinned us" when infeasible. | `backend/ml/solve.py`, `frontend/app/plan/page.tsx`, `POST /api/plan` |
 | 14 | Sensitivity Profile (per-unit Ridge coefficients, IQR whiskers) + Cumulative SHAP Wallet (per-category area chart, re-explained through current model) | `frontend/app/profile/page.tsx`, `frontend/app/wallet/page.tsx` |
-| 15 (partial) | **Demo mode** — synthetic 180-day correlated dataset, idempotent | `backend/synth/generator.py` |
+| 15 | **Demo mode** — synthetic 180-day correlated dataset, idempotent | `backend/synth/generator.py` |
 | 3 | **WHOOP backfill** — token refresh + paged pull of recovery/cycle/sleep/workout, idempotent upserts, rate-limit aware | `backend/workers/backfill.py` |
 | 4 | **WHOOP webhooks** — HMAC-SHA256 verified, async re-pull of last 3 days | `backend/api/webhooks.py` |
 | 4 | **Safety-net cron** — re-pull last 3 days for every connected user | `backend/workers/safety_net.py` |
 | 10 | **Nightly retrain cron config** — Railway dashboard schedule for `train_now.py` | `backend/CRONS.md` |
-| 15 | **PWA install** — manifest.ts, SVG icons, iOS-friendly viewport, service worker (push-ready, registered in production builds) | `frontend/app/manifest.ts`, `frontend/public/sw.js`, `frontend/components/ServiceWorkerRegister.tsx` |
+| 15 | **PWA install** — manifest.ts, SVG icons, iOS-friendly viewport, service worker | `frontend/app/manifest.ts`, `frontend/public/sw.js`, `frontend/components/ServiceWorkerRegister.tsx` |
+| 15 | **Web Push pipeline** — `push_subscriptions` table + migration, subscribe/unsubscribe API, `EnableNotificationsButton`, 9 PM `notify_evening` worker that prunes 404/410 dead subs and honors PRD §13 "early estimate" labeling. Worker accepts VAPID private key as either inline PEM or file path. | `backend/api/push.py`, `backend/workers/notify_evening.py`, `backend/db/migrations/001_push_subscriptions.sql`, `frontend/lib/push.ts`, `frontend/components/EnableNotificationsButton.tsx` |
+| 15 | **Daily check-in CTA** on the dashboard — fetches `/api/checkin` and surfaces "Log today's check-in" or "Logged ✓" so the daily action isn't buried in the nav | `frontend/components/CheckinCTA.tsx` |
+| 15 | **VAPID keypair generator** — P-256 ECDSA via `cryptography`, no extra dep beyond what we already had | `backend/scripts/generate_vapid.py` |
 
 ### Tier-1 differentiation features (CLAUDE.md §"Tier-1") — all built
 
@@ -69,16 +72,17 @@ reachable is X because Y is at its physiological bound."
 - **Sensitivity Profile** — `GET /api/profile` + `/profile` page
 - **Cumulative SHAP Wallet** — `GET /api/wallet` + `/wallet` page
 
-### ⏳ Remaining
+### ⏳ Remaining (all manual, no engineering left)
 
-| Day | Feature | Notes |
-|---|---|---|
-| 4 | Register webhook URL in WHOOP dev portal | Code is built (`/api/whoop/webhook`); needs URL added in WHOOP dashboard once frontend deploys |
-| 5 | Frontend deploy to Vercel | First push triggered build; type fixes shipped |
-| 10 | Add Railway cron schedules from `backend/CRONS.md` | One-time setup in Railway dashboard |
-| 14 | Stable IQR whiskers from real history (need ≥10 model versions) | UI shows placeholder bands until then |
-| 15 | Push notification at 9 PM | Service worker push handler is wired (`public/sw.js`); subscribe flow + 9 PM cron + `web-push` server action are deferred |
-| 15 | Loom walkthrough | After demo data is in production |
+| Step | Notes |
+|---|---|
+| Apply `db/migrations/001_push_subscriptions.sql` to live Supabase | Paste into Supabase SQL editor; idempotent |
+| Frontend deploy to Vercel | Set `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY` |
+| Set `VAPID_PRIVATE_KEY` (PEM content) + `VAPID_SUBJECT` on Railway | Multi-line OK in Railway env |
+| Add three Railway cron schedules from `backend/CRONS.md` | One service per cron; Railway disables web command for cron services |
+| Register webhook URL in WHOOP dev portal | Once frontend URL is known |
+| Stable IQR whiskers from real history (need ≥10 model versions) | UI shows placeholder bands until then |
+| Loom walkthrough | After real WHOOP data accumulates |
 
 ### 🔒 Load-bearing invariants (CLAUDE.md — guarded by tests)
 
@@ -86,6 +90,7 @@ reachable is X because Y is at its physiological bound."
 2. `TimeSeriesSplit` only, no random splits → `test_no_future_leakage`
 3. SHAP integrity within 0.01 → `test_shap_integrity.py`
 4. Inverse planner respects physiological bounds → `test_solve.py`
+5. Push payload honors PRD §13 honesty (early-estimate label, no imperatives) → `test_notify_evening.py`
 
 ## Run locally
 
@@ -113,7 +118,7 @@ cd frontend && npm run lint && npm run build
 ```
 
 Current state on `feat/days-6-15-ml-pipeline-and-ui`: ✅ ruff clean ·
-✅ 7/7 pytest pass · ✅ eslint clean · ✅ `next build` produces 8 static
+✅ 12/12 pytest pass · ✅ eslint clean · ✅ `next build` produces 8 static
 routes including `/manifest.webmanifest`.
 
 ## Architecture (one-request lifecycle)
@@ -134,6 +139,14 @@ FastAPI api/data.py reads predictions + receipts:
   GET /api/dashboard | GET /api/receipt | GET /api/profile | GET /api/wallet
   ↓
 inverse planner (POST /api/plan → ml/solve.py) on demand
+
+Independent secondary loop (Web Push):
+  browser subscribes via lib/push.ts → POST /api/push/subscribe
+  ↓
+  9 PM workers/notify_evening.py joins push_subscriptions × predictions,
+  fans out via pywebpush, prunes 404/410 dead subscriptions
+  ↓
+  service worker (public/sw.js) shows the notification, deep-links into "/"
 ```
 
 ## Honesty rules (PRD §13 — enforced in UI copy)
@@ -145,8 +158,15 @@ inverse planner (POST /api/plan → ml/solve.py) on demand
 
 ## Environment
 
-`backend/.env.example` lists the required vars. Never commit a populated `.env`
-(it's gitignored). For deploy, Railway injects env vars directly.
+`backend/.env.example` lists the required vars; `frontend/.env.local.example`
+lists the frontend ones. Never commit a populated `.env*` (gitignored). For
+deploy, Railway / Vercel inject env vars directly.
+
+For Web Push, generate a VAPID keypair once with
+`cd backend && .venv/bin/python -m scripts.generate_vapid`. The script writes
+`vapid_private.pem` (gitignored) and `vapid_public.txt` (gitignored). The
+private key path goes in `VAPID_PRIVATE_KEY` (or paste the PEM contents in
+prod); the public key string goes in `NEXT_PUBLIC_VAPID_PUBLIC_KEY`.
 
 ## Production
 
