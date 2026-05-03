@@ -302,19 +302,45 @@ async def backfill_workouts(
     return n
 
 
-async def backfill_user(conn: asyncpg.Connection, user_id: UUID, days: int = 180) -> dict[str, int]:
+async def backfill_user(
+    pool_or_conn: asyncpg.Pool | asyncpg.Connection,
+    user_id: UUID,
+    days: int = 180,
+) -> dict[str, int]:
+    """Pull `days` worth of WHOOP data into the per-day tables.
+
+    Accepts either an asyncpg Pool (preferred — releases connections between
+    paged endpoint calls so a single long-held connection can't time out on
+    Supabase's transaction-mode pooler) or a Connection (legacy, used by the
+    CLI runner). When given a Pool we acquire/release per endpoint; when given
+    a Connection we just use it throughout.
+    """
     end = dt.datetime.now(dt.UTC)
     start = end - dt.timedelta(days=days)
     start_iso = start.isoformat().replace("+00:00", "Z")
     end_iso = end.isoformat().replace("+00:00", "Z")
 
-    access_token = await _refresh_if_needed(conn, user_id)
+    is_pool = isinstance(pool_or_conn, asyncpg.Pool)
+
+    if is_pool:
+        async with pool_or_conn.acquire() as conn:
+            access_token = await _refresh_if_needed(conn, user_id)
+    else:
+        access_token = await _refresh_if_needed(pool_or_conn, user_id)
+
     headers = {"Authorization": f"Bearer {access_token}"}
     async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        n_recoveries = await backfill_recoveries(conn, client, user_id, start_iso, end_iso)
-        n_cycles = await backfill_cycles(conn, client, user_id, start_iso, end_iso)
-        n_sleeps = await backfill_sleeps(conn, client, user_id, start_iso, end_iso)
-        n_workouts = await backfill_workouts(conn, client, user_id, start_iso, end_iso)
+        async def _run(fn):
+            if is_pool:
+                async with pool_or_conn.acquire() as conn:
+                    return await fn(conn, client, user_id, start_iso, end_iso)
+            return await fn(pool_or_conn, client, user_id, start_iso, end_iso)
+
+        n_recoveries = await _run(backfill_recoveries)
+        n_cycles = await _run(backfill_cycles)
+        n_sleeps = await _run(backfill_sleeps)
+        n_workouts = await _run(backfill_workouts)
+
     return {
         "recoveries": n_recoveries,
         "cycles": n_cycles,
