@@ -28,20 +28,21 @@ async def main() -> None:
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
         raise SystemExit("DATABASE_URL is not set")
-    conn = await asyncpg.connect(dsn)
+    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5, statement_cache_size=0)
     try:
-        rows = await conn.fetch(
-            "SELECT u.id, u.email FROM users u JOIN whoop_tokens t ON t.user_id = u.id"
-        )
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT u.id, u.email FROM users u JOIN whoop_tokens t ON t.user_id = u.id"
+            )
         for row in rows:
             user_id = row["id"]
             try:
-                counts = await backfill_user(conn, user_id, days=3)
+                counts = await backfill_user(pool, user_id, days=3)
                 logger.info("safety_net user=%s email=%s counts=%s", user_id, row["email"], counts)
             except Exception:
                 logger.exception("safety_net failed for user=%s", user_id)
     finally:
-        await conn.close()
+        await pool.close()
 
 
 if __name__ == "__main__":

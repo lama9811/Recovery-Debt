@@ -7,13 +7,12 @@ The 4 AM cron (workers/safety_net.py) is the safety net for dropped webhooks.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from db.client import get_pool
 
@@ -29,7 +28,7 @@ def _verify_signature(secret: str, body: bytes, header_signature: str) -> bool:
 
 
 @router.post("/webhook")
-async def webhook(request: Request) -> dict[str, bool]:
+async def webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, bool]:
     secret = os.environ.get("WHOOP_WEBHOOK_SECRET", "").strip()
     body = await request.body()
     sig = request.headers.get("X-WHOOP-Signature") or request.headers.get("x-whoop-signature", "")
@@ -59,9 +58,10 @@ async def webhook(request: Request) -> dict[str, bool]:
             # Webhook for a user we don't know — quietly drop.
             return {"ok": True}
 
-    # Fire-and-forget the re-pull so WHOOP gets a fast 200. The cron is the
-    # safety net for any failure inside the task.
-    asyncio.create_task(_repull_recent(user_id, event_type))
+    # Schedule the re-pull via FastAPI BackgroundTasks rather than
+    # `asyncio.create_task`, which previously orphaned the coroutine — the GC
+    # could collect the task mid-run because nothing held a reference to it.
+    background_tasks.add_task(_repull_recent, user_id, event_type)
     return {"ok": True}
 
 
@@ -72,8 +72,7 @@ async def _repull_recent(user_id, event_type: str) -> None:
 
     pool = get_pool()
     try:
-        async with pool.acquire() as conn:
-            counts = await backfill_user(conn, user_id, days=3)
+        counts = await backfill_user(pool, user_id, days=3)
         logger.info("webhook re-pull user=%s event=%s counts=%s", user_id, event_type, counts)
     except Exception:
         logger.exception("webhook re-pull failed user=%s event=%s", user_id, event_type)

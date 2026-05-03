@@ -65,12 +65,15 @@ async def connect() -> RedirectResponse:
         "state": state,
     }
     response = RedirectResponse(f"{WHOOP_AUTH_URL}?{urlencode(params)}")
+    # secure=True whenever the redirect URI is HTTPS (i.e. prod). On localhost
+    # we fall back to insecure cookies so dev keeps working.
+    is_https = _require_env("WHOOP_REDIRECT_URI").startswith("https://")
     response.set_cookie(
         STATE_COOKIE,
         state,
         max_age=STATE_TTL_SECONDS,
         httponly=True,
-        secure=False,  # local dev is http; production reverse proxy upgrades this
+        secure=is_https,
         samesite="lax",
     )
     return response
@@ -80,18 +83,27 @@ async def _backfill_after_connect(user_id: UUID) -> None:
     """Background task: pull 6 months of WHOOP data right after OAuth.
 
     Imported lazily so the route module doesn't drag in pandas/sklearn at
-    import time when the backfill worker isn't actually running. Errors are
-    logged but never raised — the user has already been redirected to the
-    dashboard by the time this fires.
+    import time. Passes the Pool (not a Connection) so backfill_user can
+    acquire/release per endpoint and not hold a single connection long
+    enough to time out on Supabase's pgbouncer pooler.
+
+    Logs both start and end with `print()` (in addition to the logger) so
+    Railway log search can find them even when uvicorn's log config silences
+    custom loggers.
     """
+    import traceback
+
     from workers.backfill import backfill_user
 
+    print(f"post-connect backfill START user={user_id}", flush=True)
     pool = get_pool()
     try:
-        async with pool.acquire() as conn:
-            counts = await backfill_user(conn, user_id, days=180)
+        counts = await backfill_user(pool, user_id, days=180)
+        print(f"post-connect backfill OK user={user_id} counts={counts}", flush=True)
         logger.info("post-connect backfill OK user=%s counts=%s", user_id, counts)
-    except Exception:
+    except Exception as exc:
+        print(f"post-connect backfill FAILED user={user_id} err={exc!r}", flush=True)
+        traceback.print_exc()
         logger.exception("post-connect backfill failed user=%s", user_id)
 
 
@@ -187,3 +199,28 @@ async def status() -> dict[str, int]:
     async with pool.acquire() as conn:
         n = await conn.fetchval("SELECT COUNT(*) FROM whoop_tokens")
     return {"connected_users": int(n or 0)}
+
+
+@router.post("/backfill")
+async def backfill_now(background_tasks: BackgroundTasks) -> dict[str, str]:
+    """Manually trigger a backfill for the most-recently-connected WHOOP user.
+
+    Safety net for the auto-backfill BackgroundTask in `/callback` — if that
+    task didn't run, didn't complete, or returned empty, hitting this endpoint
+    re-runs `backfill_user(pool, user_id, days=180)` against the latest
+    connected user.
+    """
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        user_id = await conn.fetchval(
+            """
+            SELECT u.id FROM users u
+            JOIN whoop_tokens t ON t.user_id = u.id
+            ORDER BY t.updated_at DESC
+            LIMIT 1
+            """
+        )
+    if not user_id:
+        raise HTTPException(404, "No WHOOP-connected user found")
+    background_tasks.add_task(_backfill_after_connect, user_id)
+    return {"ok": "scheduled", "user_id": str(user_id)}
