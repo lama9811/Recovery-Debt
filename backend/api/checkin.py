@@ -13,7 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from db.client import get_pool
+from db.client import get_pool, resolve_active_user_id
 
 router = APIRouter(prefix="/api/checkin", tags=["checkin"])
 
@@ -21,12 +21,10 @@ DEMO_EMAIL = "demo@recoverydebt.local"
 
 
 async def _get_user_id() -> UUID:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT id FROM users WHERE email = $1", DEMO_EMAIL)
-    if not row:
-        raise HTTPException(status_code=404, detail="Demo user not found")
-    return row["id"]
+    user_id = await resolve_active_user_id(DEMO_EMAIL)
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="No user found")
+    return user_id
 
 
 class CheckinBody(BaseModel):

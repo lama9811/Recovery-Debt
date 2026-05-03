@@ -5,23 +5,30 @@ Flow:
      `state` token stored in an HttpOnly cookie.
   2. WHOOP redirects to GET /api/whoop/callback?code&state.
   3. We verify state cookie, exchange code for tokens, fetch the user's WHOOP
-     profile, upsert `users` + `whoop_tokens`, then redirect to FRONTEND_URL.
+     profile, upsert `users` + `whoop_tokens`, schedule a 6-month backfill
+     in the background, then redirect to FRONTEND_URL.
 
-Token refresh + backfill come on Day 3; this file only covers the OAuth dance.
+Backfill runs as a FastAPI BackgroundTask so the user gets their dashboard
+redirect immediately while the heavier `workers/backfill.py` paged pull
+happens server-side.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
+from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Cookie, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Cookie, HTTPException
 from fastapi.responses import RedirectResponse
 
 from db.client import get_pool
+
+logger = logging.getLogger("recovery_debt.whoop")
 
 router = APIRouter(prefix="/api/whoop", tags=["whoop"])
 
@@ -69,10 +76,30 @@ async def connect() -> RedirectResponse:
     return response
 
 
+async def _backfill_after_connect(user_id: UUID) -> None:
+    """Background task: pull 6 months of WHOOP data right after OAuth.
+
+    Imported lazily so the route module doesn't drag in pandas/sklearn at
+    import time when the backfill worker isn't actually running. Errors are
+    logged but never raised — the user has already been redirected to the
+    dashboard by the time this fires.
+    """
+    from workers.backfill import backfill_user
+
+    pool = get_pool()
+    try:
+        async with pool.acquire() as conn:
+            counts = await backfill_user(conn, user_id, days=180)
+        logger.info("post-connect backfill OK user=%s counts=%s", user_id, counts)
+    except Exception:
+        logger.exception("post-connect backfill failed user=%s", user_id)
+
+
 @router.get("/callback")
 async def callback(
     code: str,
     state: str,
+    background_tasks: BackgroundTasks,
     whoop_oauth_state: str | None = Cookie(default=None),
 ) -> RedirectResponse:
     if not whoop_oauth_state or not secrets.compare_digest(whoop_oauth_state, state):
@@ -145,6 +172,8 @@ async def callback(
             expires_at,
             scope,
         )
+
+    background_tasks.add_task(_backfill_after_connect, user_row["id"])
 
     redirect = RedirectResponse(f"{_frontend_url()}/?connected=1")
     redirect.delete_cookie(STATE_COOKIE)

@@ -15,7 +15,7 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from db.client import get_pool
+from db.client import get_pool, resolve_active_user_id
 from ml.explain import explain_one, make_explainer
 from ml.features import FEATURE_COLUMNS, build_feature_matrix
 from ml.solve import solve_for_target
@@ -27,15 +27,13 @@ DEMO_EMAIL = "demo@recoverydebt.local"
 
 
 async def _get_user_id() -> UUID:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT id FROM users WHERE email = $1", DEMO_EMAIL)
-    if not row:
+    user_id = await resolve_active_user_id(DEMO_EMAIL)
+    if user_id is None:
         raise HTTPException(
             status_code=404,
-            detail="Demo user not found — run `python -m synth.generator` then `python -m workers.train_now`",  # noqa: E501
+            detail="No user found — run `python -m synth.generator` then `python -m workers.train_now`",  # noqa: E501
         )
-    return row["id"]
+    return user_id
 
 
 async def _fetch_daily(user_id: UUID) -> pd.DataFrame:
