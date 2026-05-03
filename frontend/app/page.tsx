@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { CheckinCTA } from "@/components/CheckinCTA";
 import { ConfidenceLabel } from "@/components/ConfidenceLabel";
+import { ConnectWhoopCTA } from "@/components/ConnectWhoopCTA";
 import { EnableNotificationsButton } from "@/components/EnableNotificationsButton";
 import { ErrorState } from "@/components/ErrorState";
 import { Nav } from "@/components/Nav";
@@ -179,9 +180,10 @@ export default function Home() {
             </div>
           </section>
 
-          {/* Daily check-in CTA */}
+          {/* Daily check-in + WHOOP connect CTAs */}
           <section className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-3">
             <CheckinCTA />
+            <ConnectWhoopCTA />
           </section>
 
           {/* Ledger */}
