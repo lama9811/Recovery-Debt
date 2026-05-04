@@ -118,7 +118,7 @@ async def backfill_recoveries(
     end_iso: str,
 ) -> int:
     n = 0
-    async for rec in _paged(client, "/v1/recovery", start_iso, end_iso):
+    async for rec in _paged(client, "/v2/recovery", start_iso, end_iso):
         score = rec.get("score") or {}
         # Recovery rows are scoped to a sleep/cycle pair; use updated_at's date
         day = _to_day(rec.get("updated_at") or rec.get("created_at"))
@@ -159,7 +159,7 @@ async def backfill_cycles(
     end_iso: str,
 ) -> int:
     n = 0
-    async for rec in _paged(client, "/v1/cycle", start_iso, end_iso):
+    async for rec in _paged(client, "/v2/cycle", start_iso, end_iso):
         score = rec.get("score") or {}
         day = _to_day(rec.get("start"))
         if not day:
@@ -201,9 +201,14 @@ async def backfill_sleeps(
     end_iso: str,
 ) -> int:
     n = 0
-    async for rec in _paged(client, "/v1/activity/sleep", start_iso, end_iso):
+    async for rec in _paged(client, "/v2/activity/sleep", start_iso, end_iso):
         score = rec.get("score") or {}
         stage = score.get("stage_summary") or {}
+        # v2: sleep_needed is a top-level object inside `score`, with components
+        # broken out. Sum the parts so `sleep_need_ms` keeps meaning "the model's
+        # baseline-need estimate for this sleep" without changing downstream code.
+        needed = score.get("sleep_needed") or {}
+        sleep_need_ms = needed.get("baseline_milli")
         day = _to_day(rec.get("end") or rec.get("start"))
         if not day:
             continue
@@ -239,7 +244,7 @@ async def backfill_sleeps(
             score.get("sleep_efficiency_percentage"),
             score.get("sleep_consistency_percentage"),
             score.get("respiratory_rate"),
-            stage.get("sleep_needed_milli"),
+            sleep_need_ms,
             stage.get("disturbance_count"),
             rec.get("start"),
             rec.get("end"),
@@ -257,13 +262,14 @@ async def backfill_workouts(
     end_iso: str,
 ) -> int:
     n = 0
-    async for rec in _paged(client, "/v1/activity/workout", start_iso, end_iso):
+    async for rec in _paged(client, "/v2/activity/workout", start_iso, end_iso):
         score = rec.get("score") or {}
+        # v2: id is a UUID string; v1's int id is preserved as `v1_id`.
         whoop_id = rec.get("id")
         day = _to_day(rec.get("start"))
         if not day or whoop_id is None:
             continue
-        zones = score.get("zone_duration") or {}
+        zones = score.get("zone_durations") or {}
         await conn.execute(
             """
             INSERT INTO workouts
@@ -285,7 +291,7 @@ async def backfill_workouts(
               score_state    = EXCLUDED.score_state
             """,
             user_id,
-            int(whoop_id),
+            str(whoop_id),
             day,
             rec.get("start"),
             rec.get("end"),

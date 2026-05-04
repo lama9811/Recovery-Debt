@@ -34,7 +34,7 @@ router = APIRouter(prefix="/api/whoop", tags=["whoop"])
 
 WHOOP_AUTH_URL = "https://api.prod.whoop.com/oauth/oauth2/auth"
 WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
-WHOOP_PROFILE_URL = "https://api.prod.whoop.com/developer/v1/user/profile/basic"
+WHOOP_PROFILE_URL = "https://api.prod.whoop.com/developer/v2/user/profile/basic"
 
 # `offline` is what makes WHOOP return a refresh_token.
 WHOOP_SCOPES = "read:recovery read:cycles read:sleep read:workout read:profile offline"
