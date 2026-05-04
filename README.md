@@ -65,6 +65,11 @@ reachable is X because Y is at its physiological bound."
 | 15 | **Web Push pipeline** — `push_subscriptions` table + migration, subscribe/unsubscribe API, `EnableNotificationsButton`, 9 PM `notify_evening` worker that prunes 404/410 dead subs and honors PRD §13 "early estimate" labeling. Worker accepts VAPID private key as either inline PEM or file path. | `backend/api/push.py`, `backend/workers/notify_evening.py`, `backend/db/migrations/001_push_subscriptions.sql`, `frontend/lib/push.ts`, `frontend/components/EnableNotificationsButton.tsx` |
 | 15 | **Daily check-in CTA** on the dashboard — fetches `/api/checkin` and surfaces "Log today's check-in" or "Logged ✓" so the daily action isn't buried in the nav | `frontend/components/CheckinCTA.tsx` |
 | 15 | **VAPID keypair generator** — P-256 ECDSA via `cryptography`, no extra dep beyond what we already had | `backend/scripts/generate_vapid.py` |
+| 15 | **Real-WHOOP mode** — `Connect WHOOP` button on the dashboard, dynamic `resolve_active_user_id()` (real user when present, demo fallback), auto-backfill scheduled as a `BackgroundTask` in the OAuth callback. Manual `POST /api/whoop/backfill` and `/backfill-sync` (debug, returns the actual traceback) endpoints as safety nets when the BackgroundTask doesn't fire. | `frontend/components/ConnectWhoopCTA.tsx`, `backend/api/whoop.py`, `backend/db/client.py` |
+| 15 | **`/health/db` deep health check** — proves the pool opened and `SELECT 1` works. Bisects "app booted but DB is dead" issues with one curl. | `backend/api/main.py` |
+| 15 | **Self-healing API URL on the frontend** — `frontend/lib/api.ts` validates `NEXT_PUBLIC_API_URL` is a real URL; falls back to a hardcoded prod Railway URL when the env var is misset (e.g. swapped with the VAPID key). Localhost dev still hits `:8000`. | `frontend/lib/api.ts` |
+| 15 | **Production hardening** — pgbouncer-compatible asyncpg (`statement_cache_size=0`); `backfill_user(pool, ...)` releases connection between paged WHOOP calls so Supabase's pooler can't time it out; loud `print()` traceback on lifespan/backfill failures so Railway logs surface them; `secure=True` cookies on HTTPS redirects; `BackgroundTasks` (not `asyncio.create_task`) for webhook re-pulls so the GC doesn't collect mid-run. | `backend/db/client.py`, `backend/workers/backfill.py`, `backend/api/main.py`, `backend/api/whoop.py`, `backend/api/webhooks.py` |
+| 15 | **Friendly empty states** — `ErrorState` detects `→ 503` and renders "Your model isn't ready yet" instead of a raw error. New users hitting `/plan`, `/profile`, `/wallet`, `/whatif` before the first nightly retrain get an explanation, not a stack trace. | `frontend/components/ErrorState.tsx` |
 
 ### Tier-1 differentiation features (CLAUDE.md §"Tier-1") — all built
 
@@ -72,17 +77,12 @@ reachable is X because Y is at its physiological bound."
 - **Sensitivity Profile** — `GET /api/profile` + `/profile` page
 - **Cumulative SHAP Wallet** — `GET /api/wallet` + `/wallet` page
 
-### ⏳ Remaining (all manual, no engineering left)
+### ⏳ Remaining
 
 | Step | Notes |
 |---|---|
-| Apply `db/migrations/001_push_subscriptions.sql` to live Supabase | Paste into Supabase SQL editor; idempotent |
-| Frontend deploy to Vercel | Set `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY` |
-| Set `VAPID_PRIVATE_KEY` (PEM content) + `VAPID_SUBJECT` on Railway | Multi-line OK in Railway env |
-| Add three Railway cron schedules from `backend/CRONS.md` | One service per cron; Railway disables web command for cron services |
-| Register webhook URL in WHOOP dev portal | Once frontend URL is known |
 | Stable IQR whiskers from real history (need ≥10 model versions) | UI shows placeholder bands until then |
-| Loom walkthrough | After real WHOOP data accumulates |
+| Loom walkthrough | After ~30 days of real WHOOP data accumulates |
 
 ### 🔒 Load-bearing invariants (CLAUDE.md — guarded by tests)
 
@@ -124,21 +124,26 @@ routes including `/manifest.webmanifest`.
 ## Architecture (one-request lifecycle)
 
 ```
-WHOOP OAuth (api/whoop.py) → tokens in Supabase
+User clicks "Connect WHOOP" on Vercel → /api/whoop/connect (Railway)
+  ↓ OAuth state cookie (secure=True on HTTPS)
+WHOOP login → /api/whoop/callback?code&state
+  ↓ exchange code → upsert users + whoop_tokens
+  ├─ schedule _backfill_after_connect as a FastAPI BackgroundTask
+  │     (uses Pool.acquire() per endpoint so pgbouncer can't kill the connection)
+  └─ RedirectResponse → ${FRONTEND_URL}/?connected=1
+
+4 AM workers/safety_net.py + WHOOP webhooks → re-pull last 3 days for every user
   ↓
-workers/backfill.py + api/webhooks.py + 4 AM workers/safety_net.py
-  populate recoveries / cycles / sleeps / workouts
-  ↓
-daily checkin (POST /api/checkin) writes to checkins
-  ↓
-nightly retrain (workers/train_now.py, scheduled per backend/CRONS.md)
+4:30 AM workers/train_now.py
   ├─ build_feature_matrix → RidgeCV(TimeSeriesSplit) → pickle to ml/artifacts/
   └─ shap.LinearExplainer → per-feature contributions to shap_values
-  ↓
-FastAPI api/data.py reads predictions + receipts:
-  GET /api/dashboard | GET /api/receipt | GET /api/profile | GET /api/wallet
-  ↓
-inverse planner (POST /api/plan → ml/solve.py) on demand
+
+User submits daily checkin (POST /api/checkin) → checkins table
+
+FastAPI api/data.py reads predictions + receipts via resolve_active_user_id()
+  (prefers real-WHOOP user, falls back to demo):
+  GET /api/dashboard | /api/receipt | /api/profile | /api/wallet
+  POST /api/whatif (slider replay) | /api/plan (SLSQP inverse planner)
 
 Independent secondary loop (Web Push):
   browser subscribes via lib/push.ts → POST /api/push/subscribe
@@ -147,6 +152,13 @@ Independent secondary loop (Web Push):
   fans out via pywebpush, prunes 404/410 dead subscriptions
   ↓
   service worker (public/sw.js) shows the notification, deep-links into "/"
+
+Diagnostic endpoints when prod misbehaves:
+  /health        → app boot
+  /health/db     → pool opened + SELECT 1
+  /api/whoop/status      → connected_users count
+  POST /api/whoop/backfill       → schedule manual backfill
+  POST /api/whoop/backfill-sync  → run synchronously, return traceback in JSON
 ```
 
 ## Honesty rules (PRD §13 — enforced in UI copy)
@@ -170,10 +182,21 @@ prod); the public key string goes in `NEXT_PUBLIC_VAPID_PUBLIC_KEY`.
 
 ## Production
 
-- Backend: `https://recovery-debt-production.up.railway.app` (`/health` returns `{"ok":true}`)
-- Frontend: not yet deployed
-- Database: Supabase Postgres
+- Backend: `https://recovery-debt-production.up.railway.app`
+- Frontend: deployed on Vercel (auto-deploys on push to `main`)
+- Database: Supabase Postgres (Transaction Pooler URL, port 6543, IPv4)
+- Crons: 4 services on Railway — `Recovery-Debt` (web), `cron-safety-net`, `cron-train-now`, `cron-notify-evening`
 - Repo: `lama9811/Recovery-Debt`, default branch `main`
+
+### Production deployment gotchas (learned the hard way — see CLAUDE.md "Production deployment gotchas" for full detail)
+
+1. **`DATABASE_URL` must be Supabase's IPv4 Transaction Pooler URL** (`*.pooler.supabase.com:6543`), not the direct host. Direct host is IPv6-only; Railway can't reach it. URL-encode special chars in the password (`@`→`%40`, `$`→`%24`).
+2. **`backend/requirements.txt` must include the full ML stack.** A slim Day-2 version causes import failures on the data routes; Railway papers over by serving the previous build.
+3. **`NEXT_PUBLIC_*` env vars are baked at build time** — redeploy without build cache after editing them on Vercel.
+4. **Railway crons are separate services per cron**, sharing variables via `${{Recovery-Debt.NAME}}` references. Don't put cron schedules on the web service.
+5. **WHOOP redirect URI** is the backend callback — register `https://<railway>/api/whoop/callback`, not the Vercel URL.
+6. **Apply `db/migrations/001_push_subscriptions.sql`** to live Supabase before scheduling the 9 PM `notify_evening` cron.
+7. **Generate VAPID keypair** with `cd backend && .venv/bin/python -m scripts.generate_vapid` — public key → Vercel `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, private key (PEM contents) → Railway `VAPID_PRIVATE_KEY`. Plus `VAPID_SUBJECT=mailto:you@example.com` on Railway.
 
 ## Notes
 
