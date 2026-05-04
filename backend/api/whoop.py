@@ -224,3 +224,41 @@ async def backfill_now(background_tasks: BackgroundTasks) -> dict[str, str]:
         raise HTTPException(404, "No WHOOP-connected user found")
     background_tasks.add_task(_backfill_after_connect, user_id)
     return {"ok": "scheduled", "user_id": str(user_id)}
+
+
+@router.post("/backfill-sync")
+async def backfill_sync() -> dict[str, object]:
+    """Diagnostic: run backfill synchronously and return the result/traceback.
+
+    Used to debug `/backfill` (which schedules a BackgroundTask whose errors
+    only surface in Railway logs). This endpoint blocks the request until
+    backfill finishes, then returns either {ok: True, counts: ...} or
+    {ok: False, error: ..., traceback: ...} so we can see exactly what's
+    failing in production from outside the Railway log UI. Slow (~30-60 sec).
+    """
+    import traceback
+
+    from workers.backfill import backfill_user
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        user_id = await conn.fetchval(
+            """
+            SELECT u.id FROM users u
+            JOIN whoop_tokens t ON t.user_id = u.id
+            ORDER BY t.updated_at DESC
+            LIMIT 1
+            """
+        )
+    if not user_id:
+        raise HTTPException(404, "No WHOOP-connected user found")
+    try:
+        counts = await backfill_user(pool, user_id, days=180)
+        return {"ok": True, "user_id": str(user_id), "counts": counts}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "user_id": str(user_id),
+            "error": repr(exc),
+            "traceback": traceback.format_exc(),
+        }
