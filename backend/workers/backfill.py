@@ -89,6 +89,12 @@ def _to_day(iso_ts: str | None) -> dt.date | None:
     return dt.datetime.fromisoformat(iso_ts.replace("Z", "+00:00")).date()
 
 
+def _to_dt(iso_ts: str | None) -> dt.datetime | None:
+    if not iso_ts:
+        return None
+    return dt.datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+
+
 async def _paged(client: httpx.AsyncClient, path: str, start_iso: str, end_iso: str):
     next_token: str | None = None
     while True:
@@ -185,8 +191,8 @@ async def backfill_cycles(
             score.get("kilojoule"),
             score.get("average_heart_rate"),
             score.get("max_heart_rate"),
-            rec.get("start"),
-            rec.get("end"),
+            _to_dt(rec.get("start")),
+            _to_dt(rec.get("end")),
             rec.get("score_state"),
         )
         n += 1
@@ -246,8 +252,8 @@ async def backfill_sleeps(
             score.get("respiratory_rate"),
             sleep_need_ms,
             stage.get("disturbance_count"),
-            rec.get("start"),
-            rec.get("end"),
+            _to_dt(rec.get("start")),
+            _to_dt(rec.get("end")),
             rec.get("score_state"),
         )
         n += 1
@@ -293,8 +299,8 @@ async def backfill_workouts(
             user_id,
             str(whoop_id),
             day,
-            rec.get("start"),
-            rec.get("end"),
+            _to_dt(rec.get("start")),
+            _to_dt(rec.get("end")),
             score.get("strain"),
             rec.get("sport_id"),
             score.get("average_heart_rate"),
