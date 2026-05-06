@@ -262,3 +262,41 @@ async def backfill_sync() -> dict[str, object]:
             "error": repr(exc),
             "traceback": traceback.format_exc(),
         }
+
+
+@router.post("/train-sync")
+async def train_sync() -> dict[str, object]:
+    """Diagnostic: retrain Ridge synchronously and return summary/traceback.
+
+    Railway artifacts are ephemeral, so after every deploy `/profile`,
+    `/plan`, `/wallet`, and `/whatif` 503 until the 4:30 AM cron runs. This
+    endpoint mirrors `backfill-sync`: blocks the request until training
+    finishes, then returns either {ok: True, summary: ...} or {ok: False,
+    error: ..., traceback: ...}. Slow (~30-90 sec depending on row count).
+    """
+    import traceback
+
+    from workers.train_now import run_train
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        user_id = await conn.fetchval(
+            """
+            SELECT u.id FROM users u
+            JOIN whoop_tokens t ON t.user_id = u.id
+            ORDER BY t.updated_at DESC
+            LIMIT 1
+            """
+        )
+        if not user_id:
+            raise HTTPException(404, "No WHOOP-connected user found")
+        try:
+            summary = await run_train(conn, user_id)
+            return {"ok": True, "summary": summary}
+        except Exception as exc:
+            return {
+                "ok": False,
+                "user_id": str(user_id),
+                "error": repr(exc),
+                "traceback": traceback.format_exc(),
+            }
