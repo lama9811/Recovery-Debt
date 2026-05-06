@@ -63,6 +63,93 @@ async def fetch_daily(conn: asyncpg.Connection, user_id: UUID) -> pd.DataFrame:
     return pd.DataFrame([dict(r) for r in rows])
 
 
+async def run_train(conn: asyncpg.Connection, user_id: UUID) -> dict[str, object]:
+    """Retrain Ridge for `user_id` and write artifact + prediction + SHAP rows.
+
+    Returns a JSON-friendly summary dict so callers (CLI prints it, the
+    /api/whoop/train-sync endpoint returns it) can show metrics, the new
+    model version, and tomorrow's predicted recovery without having to
+    re-query the DB.
+    """
+    daily = await fetch_daily(conn, user_id)
+    if daily.empty:
+        raise RuntimeError(f"No daily rows for user {user_id} — run backfill before training")
+
+    matrix = build_feature_matrix(daily)
+    result = train_ridge(matrix)
+
+    version = dt.datetime.now(dt.UTC).strftime("v%Y%m%d_%H%M%S")
+    path = save_artifact(result, version)
+
+    await conn.execute(
+        """
+        INSERT INTO models (user_id, version, n_training_days, metrics, artifact_path)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (user_id, version) DO UPDATE SET
+          n_training_days = EXCLUDED.n_training_days,
+          metrics         = EXCLUDED.metrics,
+          artifact_path   = EXCLUDED.artifact_path
+        """,
+        user_id,
+        version,
+        int(result.metrics["n_train_days"]),
+        json.dumps(result.metrics),
+        str(path),
+    )
+
+    latest_row = matrix[FEATURE_COLUMNS].iloc[-1]
+    explainer = make_explainer(result.pipeline, result.X_train)
+    ep = explain_one(result.pipeline, explainer, FEATURE_COLUMNS, latest_row)
+    residual = ep.integrity_residual()
+    if residual > 0.01:
+        raise RuntimeError(
+            f"SHAP integrity check failed (residual={residual:.4f}) — "
+            "explainer was fit on the wrong reference data"
+        )
+
+    target_day = dt.date.today() + dt.timedelta(days=1)
+    prediction_id = await conn.fetchval(
+        """
+        INSERT INTO predictions (user_id, target_day, predicted_recovery, model_version)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+        """,
+        user_id,
+        target_day,
+        ep.prediction,
+        version,
+    )
+    await conn.execute("DELETE FROM shap_values WHERE prediction_id = $1", prediction_id)
+    async with conn.transaction():
+        for feat, contrib in ep.contributions.items():
+            await conn.execute(
+                """
+                INSERT INTO shap_values (prediction_id, feature_name, contribution, base_value)
+                VALUES ($1, $2, $3, $4)
+                """,
+                prediction_id,
+                feat,
+                float(contrib),
+                float(ep.base_value),
+            )
+
+    return {
+        "user_id": str(user_id),
+        "version": version,
+        "artifact_path": str(path),
+        "daily_rows": int(len(daily)),
+        "feature_matrix_shape": list(matrix.shape),
+        "metrics": result.metrics,
+        "tomorrow": {
+            "target_day": target_day.isoformat(),
+            "prediction_id": str(prediction_id),
+            "predicted_recovery": float(ep.prediction),
+            "base_value": float(ep.base_value),
+            "integrity_residual": float(residual),
+        },
+    }
+
+
 async def main() -> None:
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
@@ -72,75 +159,11 @@ async def main() -> None:
         user_id = await conn.fetchval("SELECT id FROM users WHERE email = $1", DEMO_EMAIL)
         if user_id is None:
             raise SystemExit("Demo user not found — run `python -m synth.generator` first")
-
-        daily = await fetch_daily(conn, user_id)
-        print(f"daily rows: {len(daily)}")
-
-        matrix = build_feature_matrix(daily)
-        print(f"feature matrix: {matrix.shape}")
-
-        result = train_ridge(matrix)
-        print(f"metrics: {json.dumps(result.metrics, indent=2)}")
-
-        version = dt.datetime.utcnow().strftime("v%Y%m%d_%H%M%S")
-        path = save_artifact(result, version)
-        print(f"artifact: {path}")
-
-        await conn.execute(
-            """
-            INSERT INTO models (user_id, version, n_training_days, metrics, artifact_path)
-            VALUES ($1, $2, $3, $4::jsonb, $5)
-            ON CONFLICT (user_id, version) DO UPDATE SET
-              n_training_days = EXCLUDED.n_training_days,
-              metrics         = EXCLUDED.metrics,
-              artifact_path   = EXCLUDED.artifact_path
-            """,
-            user_id,
-            version,
-            int(result.metrics["n_train_days"]),
-            json.dumps(result.metrics),
-            str(path),
-        )
-
-        # Predict + explain "tomorrow" using the latest feature row
-        latest_row = matrix[FEATURE_COLUMNS].iloc[-1]
-        explainer = make_explainer(result.pipeline, result.X_train)
-        ep = explain_one(result.pipeline, explainer, FEATURE_COLUMNS, latest_row)
-        residual = ep.integrity_residual()
-        print(f"prediction={ep.prediction:.2f} base={ep.base_value:.2f} |residual|={residual:.4f}")
-        if residual > 0.01:
-            raise SystemExit(
-                f"SHAP integrity check failed (residual={residual:.4f}) — "
-                "explainer was fit on the wrong reference data"
-            )
-
-        target_day = dt.date.today() + dt.timedelta(days=1)
-        prediction_id = await conn.fetchval(
-            """
-            INSERT INTO predictions (user_id, target_day, predicted_recovery, model_version)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id
-            """,
-            user_id,
-            target_day,
-            ep.prediction,
-            version,
-        )
-        # Wipe old shap rows for this prediction (idempotency on rerun)
-        await conn.execute("DELETE FROM shap_values WHERE prediction_id = $1", prediction_id)
-        async with conn.transaction():
-            for feat, contrib in ep.contributions.items():
-                await conn.execute(
-                    """
-                    INSERT INTO shap_values (prediction_id, feature_name, contribution, base_value)
-                    VALUES ($1, $2, $3, $4)
-                    """,
-                    prediction_id,
-                    feat,
-                    float(contrib),
-                    float(ep.base_value),
-                )
-        print(f"wrote prediction {prediction_id} for {target_day}")
+        try:
+            summary = await run_train(conn, user_id)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from exc
+        print(json.dumps(summary, indent=2))
     finally:
         await conn.close()
 
