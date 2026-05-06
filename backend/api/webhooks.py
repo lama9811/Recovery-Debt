@@ -7,6 +7,7 @@ The 4 AM cron (workers/safety_net.py) is the safety net for dropped webhooks.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import logging
@@ -20,11 +21,18 @@ router = APIRouter(prefix="/api/whoop", tags=["whoop"])
 logger = logging.getLogger("recovery_debt.whoop_webhook")
 
 
-def _verify_signature(secret: str, body: bytes, header_signature: str) -> bool:
-    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    # WHOOP sends the digest as plain hex; some implementations prefix `sha256=`
-    received = header_signature.removeprefix("sha256=").strip().lower()
-    return hmac.compare_digest(expected, received)
+def _verify_signature(
+    secret: str, body: bytes, header_signature: str, header_timestamp: str
+) -> bool:
+    # v2: base64(HMAC-SHA256(timestamp_header || raw_body, client_secret)).
+    # v1's hex-only single-header scheme was removed when v1 webhooks were sunset.
+    if not header_signature or not header_timestamp:
+        return False
+    digest = hmac.new(
+        secret.encode(), header_timestamp.encode() + body, hashlib.sha256
+    ).digest()
+    expected = base64.b64encode(digest).decode()
+    return hmac.compare_digest(expected, header_signature.strip())
 
 
 @router.post("/webhook")
@@ -32,11 +40,14 @@ async def webhook(request: Request, background_tasks: BackgroundTasks) -> dict[s
     secret = os.environ.get("WHOOP_WEBHOOK_SECRET", "").strip()
     body = await request.body()
     sig = request.headers.get("X-WHOOP-Signature") or request.headers.get("x-whoop-signature", "")
+    ts = request.headers.get("X-WHOOP-Signature-Timestamp") or request.headers.get(
+        "x-whoop-signature-timestamp", ""
+    )
 
     # Reject unauthenticated callbacks. In dev, leaving the secret empty disables
     # the gate so you can curl-test the endpoint locally.
     if secret:
-        if not sig or not _verify_signature(secret, body, sig):
+        if not _verify_signature(secret, body, sig, ts):
             raise HTTPException(401, "bad signature")
 
     try:
